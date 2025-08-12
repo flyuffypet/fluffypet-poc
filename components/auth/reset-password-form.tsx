@@ -1,42 +1,62 @@
 "use client"
 
+import type React from "react"
+
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { updatePasswordAction } from "@/lib/actions/auth-actions"
+import { updatePassword } from "@/lib/actions/auth-actions"
 import { useToast } from "@/hooks/use-toast"
 
 export function ResetPasswordForm() {
   const [isLoading, setIsLoading] = useState(false)
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const router = useRouter()
   const searchParams = useSearchParams()
   const { toast } = useToast()
 
-  const handleSubmit = async (formData: FormData) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (password !== confirmPassword) {
+      toast({
+        title: "Error",
+        description: "Passwords do not match",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (password.length < 6) {
+      toast({
+        title: "Error",
+        description: "Password must be at least 6 characters",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsLoading(true)
 
     try {
-      const result = await updatePasswordAction(formData)
+      const formData = new FormData()
+      formData.append("password", password)
 
-      if (result.error) {
-        toast({
-          title: "Error",
-          description: result.error,
-          variant: "destructive",
-        })
-      } else {
-        toast({
-          title: "Success",
-          description: result.message,
-        })
-        router.push("/dashboard")
-      }
-    } catch (error) {
+      await updatePassword(formData)
+
+      toast({
+        title: "Success",
+        description: "Password updated successfully",
+      })
+
+      router.push("/dashboard")
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "An unexpected error occurred",
+        description: error.message || "Failed to update password",
         variant: "destructive",
       })
     } finally {
@@ -45,17 +65,17 @@ export function ResetPasswordForm() {
   }
 
   return (
-    <form action={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="password">New Password</Label>
         <Input
           id="password"
-          name="password"
           type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
           required
           minLength={6}
           placeholder="Enter your new password"
-          disabled={isLoading}
         />
       </div>
 
@@ -63,16 +83,16 @@ export function ResetPasswordForm() {
         <Label htmlFor="confirmPassword">Confirm Password</Label>
         <Input
           id="confirmPassword"
-          name="confirmPassword"
           type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
           required
           minLength={6}
           placeholder="Confirm your new password"
-          disabled={isLoading}
         />
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button type="submit" className="w-full" disabled={isLoading || !password || !confirmPassword}>
         {isLoading ? "Updating..." : "Update Password"}
       </Button>
     </form>

@@ -1,25 +1,43 @@
 import { NextResponse } from "next/server"
-import { handleUpload } from "@vercel/blob/client"
+import { getSupabaseServerClient } from "@/lib/supabase-server"
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const jsonResponse = await handleUpload({
-      request,
-      onBeforeGenerateToken: async (pathname: string) => {
-        // Add any validation logic here if needed
-        return {
-          allowedContentTypes: ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"],
-          maximumSizeInBytes: 10 * 1024 * 1024, // 10MB limit
-        }
-      },
-      onUploadCompleted: async ({ blob, tokenPayload }) => {
-        // Handle upload completion if needed
-        console.log("Upload completed:", blob.url)
-      },
-    })
+    const { fileName, fileType, bucket = "media", folder } = await req.json()
 
-    return jsonResponse
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    if (!fileName || !fileType) {
+      return NextResponse.json({ error: "fileName and fileType are required" }, { status: 400 })
+    }
+
+    const supabase = getSupabaseServerClient()
+
+    // Check authentication
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Generate unique filename
+    const fileExt = fileName.split(".").pop()
+    const uniqueFileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+    const filePath = folder ? `${folder}/${uniqueFileName}` : uniqueFileName
+
+    // Create signed upload URL
+    const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(filePath)
+
+    if (error) {
+      return NextResponse.json({ error: `Failed to create upload URL: ${error.message}` }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      uploadUrl: data.signedUrl,
+      path: filePath,
+      token: data.token,
+    })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

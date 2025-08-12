@@ -1,371 +1,218 @@
 # FluffyPet Platform Deployment Guide
 
-This guide covers deploying the FluffyPet platform to production with proper authentication configuration.
+## Overview
+This guide covers deploying the FluffyPet platform to production with proper authentication and database configuration.
 
 ## Prerequisites
-
-- Vercel account (recommended) or other hosting platform
-- Supabase project configured
+- Supabase project configured (see SUPABASE_SETUP.md)
+- Vercel account and project
 - Domain name (optional but recommended)
-- Environment variables ready
+- Required API keys and environment variables
 
-## Environment Configuration
+## Environment Variables
 
-### Production Environment Variables
-
-Ensure these environment variables are set in your production environment:
-
-\`\`\`bash
+### Required Variables
+\`\`\`env
 # Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
 # Site Configuration
 NEXT_PUBLIC_SITE_URL=https://your-domain.com
 
 # Email Service
-RESEND_API_KEY=your-resend-api-key
+RESEND_API_KEY=your_resend_api_key
 
 # Notifications
-NOVU_API_KEY=your-novu-api-key
-NEXT_PUBLIC_NOVU_APP_ID=your-novu-app-id
+NOVU_API_KEY=your_novu_api_key
+NEXT_PUBLIC_NOVU_APP_ID=your_novu_app_id
 
 # Payments
-RAZORPAY_KEY_ID=your-razorpay-key-id
-RAZORPAY_KEY_SECRET=your-razorpay-key-secret
-NEXT_PUBLIC_RAZORPAY_KEY_ID=your-razorpay-key-id
+RAZORPAY_KEY_ID=your_razorpay_key_id
+RAZORPAY_KEY_SECRET=your_razorpay_key_secret
+NEXT_PUBLIC_RAZORPAY_KEY_ID=your_razorpay_key_id
 
 # Maps
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
-NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=your-google-maps-map-id
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=your_google_maps_map_id
 
-# AI Integration
-OPENAI_API_KEY=your-openai-api-key
+# AI
+OPENAI_API_KEY=your_openai_api_key
 
-# Security
-CRON_SECRET=your-cron-secret
+# Blob Storage (automatically configured on Vercel)
+BLOB_READ_WRITE_TOKEN=auto_configured_by_vercel
 \`\`\`
 
-### Supabase Dashboard Configuration
+## Deployment Steps
 
-1. **Authentication > URL Configuration**:
-   - Site URL: `https://your-domain.com`
-   - Redirect URLs:
-     - `https://your-domain.com/auth/callback`
-     - `https://your-domain.com/**`
-     - `https://*.vercel.app/auth/callback` (for preview deployments)
-     - `https://*.vercel.app/**` (for preview deployments)
-     - `http://localhost:3000/auth/callback` (for local development)
-     - `http://localhost:3000/**` (for local development)
+### 1. Prepare Repository
+\`\`\`bash
+# Ensure all changes are committed
+git add .
+git commit -m "Production deployment preparation"
+git push origin main
+\`\`\`
 
-2. **Authentication > Email Templates**:
-   Update all email templates to use the correct callback URL format.
+### 2. Configure Vercel Project
+1. Connect your GitHub repository to Vercel
+2. Set up environment variables in Vercel dashboard
+3. Configure custom domain (if applicable)
 
-3. **Row Level Security**:
-   Ensure RLS is enabled on all tables:
+### 3. Database Migration
+\`\`\`bash
+# Run database migrations (if any)
+npm run db:migrate
+\`\`\`
 
-   \`\`\`sql
-   -- Enable RLS on all tables
-   ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE pets ENABLE ROW LEVEL SECURITY;
-   ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-   -- ... etc for all tables
-   \`\`\`
+### 4. Build and Deploy
+\`\`\`bash
+# Test build locally first
+npm run build
 
-## Vercel Deployment
+# Deploy to Vercel
+vercel --prod
+\`\`\`
 
-1. **Connect Repository**
+## Post-Deployment Checklist
 
-   \`\`\`bash
-   # Install Vercel CLI
-   npm i -g vercel
+### Authentication Testing
+- [ ] Sign up with new email
+- [ ] Confirm email verification works
+- [ ] Test password reset flow
+- [ ] Verify OAuth providers (if configured)
+- [ ] Test logout functionality
 
-   # Login to Vercel
-   vercel login
+### Database Verification
+- [ ] Verify RLS policies are working
+- [ ] Test multi-tenant data isolation
+- [ ] Check database connection pooling
+- [ ] Monitor query performance
 
-   # Deploy from project directory
-   vercel
-   \`\`\`
+### File Upload Testing
+- [ ] Test image uploads
+- [ ] Verify file access permissions
+- [ ] Check file size limits
+- [ ] Test file deletion
 
-2. **Configure Environment Variables**
+### API Endpoints
+- [ ] Test all API routes
+- [ ] Verify authentication middleware
+- [ ] Check rate limiting
+- [ ] Test error handling
 
-   In Vercel Dashboard:
-   1. Go to your project settings
-   2. Navigate to "Environment Variables"
-   3. Add all required variables listed above
-   4. Set appropriate environments (Production, Preview, Development)
+### Performance Monitoring
+- [ ] Set up Vercel Analytics
+- [ ] Configure Speed Insights
+- [ ] Monitor Core Web Vitals
+- [ ] Set up error tracking
 
-3. **Configure Domains**
+## Production Configuration
 
-   1. In Vercel Dashboard, go to "Domains"
-   2. Add your custom domain
-   3. Configure DNS records as instructed
-   4. Update `NEXT_PUBLIC_SITE_URL` to match your domain
+### Security Headers
+The platform includes security headers via Next.js configuration:
+- Content Security Policy
+- X-Frame-Options
+- X-Content-Type-Options
+- Referrer Policy
 
-4. **Configure Build Settings**
+### Caching Strategy
+- Static assets cached at CDN level
+- API responses cached appropriately
+- Database queries optimized
+- Image optimization enabled
 
-   \`\`\`json
-   // vercel.json
-   {
-     "buildCommand": "npm run build",
-     "devCommand": "npm run dev",
-     "installCommand": "npm install",
-     "framework": "nextjs",
-     "regions": ["iad1", "sfo1"],
-     "functions": {
-       "app/api/**/*.ts": {
-         "maxDuration": 30
-       }
-     }
-   }
-   \`\`\`
+### Monitoring and Alerts
+Set up monitoring for:
+- Application errors
+- Database performance
+- Authentication failures
+- File upload issues
+- API response times
 
-## Database Migration
+## Scaling Considerations
 
-1. **Run Migrations**
+### Database Scaling
+- Monitor connection usage
+- Consider read replicas for heavy read workloads
+- Implement connection pooling
+- Optimize slow queries
 
-   \`\`\`bash
-   # Run database migrations
-   npm run db:migrate
+### File Storage Scaling
+- Monitor storage usage
+- Implement file cleanup policies
+- Consider CDN for global distribution
+- Optimize image sizes
 
-   # Seed initial data (optional)
-   npm run db:seed
-   \`\`\`
+### Application Scaling
+- Monitor memory usage
+- Implement proper caching
+- Consider serverless functions for heavy operations
+- Monitor cold start times
 
-2. **Verify Database Schema**
+## Backup and Recovery
 
-   Check that all tables, indexes, and policies are created correctly:
+### Database Backups
+- Supabase provides automatic backups
+- Consider additional backup strategies for critical data
+- Test restore procedures regularly
 
-   \`\`\`sql
-   -- Check tables
-   SELECT table_name FROM information_schema.tables 
-   WHERE table_schema = 'public';
-
-   -- Check RLS policies
-   SELECT schemaname, tablename, policyname 
-   FROM pg_policies 
-   WHERE schemaname = 'public';
-   \`\`\`
-
-## Security Configuration
-
-1. **Configure CORS**
-
-   In Supabase Dashboard → Settings → API:
-   - Add your domain to allowed origins
-   - Configure appropriate CORS settings
-
-2. **Set Up Rate Limiting**
-
-   Configure rate limits in Supabase:
-   - Email signup: 3 per hour
-   - SMS signup: 3 per hour  
-   - Email signin: 6 per hour
-
-3. **Enable Security Features**
-
-   - Enable email confirmations
-   - Enable double confirm for email changes
-   - Configure JWT expiry (recommended: 1 hour)
-   - Enable refresh token rotation
-
-## Performance Optimization
-
-1. **Configure Caching**
-
-   \`\`\`typescript
-   // next.config.mjs
-   /** @type {import('next').NextConfig} */
-   const nextConfig = {
-     experimental: {
-       turbo: {
-         rules: {
-           '*.svg': {
-             loaders: ['@svgr/webpack'],
-             as: '*.js',
-           },
-         },
-       },
-     },
-     images: {
-       domains: ['your-supabase-project.supabase.co'],
-       formats: ['image/webp', 'image/avif'],
-     },
-     headers: async () => [
-       {
-         source: '/(.*)',
-         headers: [
-           {
-             key: 'X-Frame-Options',
-             value: 'DENY',
-           },
-           {
-             key: 'X-Content-Type-Options',
-             value: 'nosniff',
-           },
-           {
-             key: 'Referrer-Policy',
-             value: 'origin-when-cross-origin',
-           },
-         ],
-       },
-     ],
-   }
-
-   export default nextConfig
-   \`\`\`
-
-2. **Enable Analytics**
-
-   \`\`\`typescript
-   // app/layout.tsx
-   import { Analytics } from '@vercel/analytics/react'
-   import { SpeedInsights } from '@vercel/speed-insights/next'
-
-   export default function RootLayout({
-     children,
-   }: {
-     children: React.ReactNode
-   }) {
-     return (
-       <html lang="en">
-         <body>
-           {children}
-           <Analytics />
-           <SpeedInsights />
-         </body>
-       </html>
-     )
-   }
-   \`\`\`
-
-## Monitoring and Logging
-
-1. **Set Up Error Tracking**
-
-   Configure error boundaries and logging:
-
-   \`\`\`typescript
-   // lib/logger.ts
-   export function logError(error: Error, context?: string) {
-     console.error(`[${context}]`, error)
-     // Add external error tracking service here
-   }
-   \`\`\`
-
-2. **Monitor Performance**
-
-   - Use Vercel Analytics for performance monitoring
-   - Monitor Supabase logs for database issues
-   - Set up uptime monitoring
-
-## Testing Production Deployment
-
-1. **Functional Testing**
-
-   \`\`\`bash
-   # Test authentication flow
-   curl -X POST https://your-domain.com/api/auth/signup \
-     -H "Content-Type: application/json" \
-     -d '{"email":"test@example.com","password":"testpass123"}'
-
-   # Test API endpoints
-   curl https://your-domain.com/api/health
-   \`\`\`
-
-2. **Load Testing**
-
-   Use tools like:
-   - Artillery.io for API load testing
-   - Lighthouse for performance testing
-   - WebPageTest for comprehensive analysis
-
-## Rollback Strategy
-
-1. **Vercel Rollback**
-
-   \`\`\`bash
-   # List deployments
-   vercel ls
-
-   # Rollback to previous deployment
-   vercel rollback [deployment-url]
-   \`\`\`
-
-2. **Database Rollback**
-
-   Keep database migration rollback scripts:
-
-   \`\`\`sql
-   -- Example rollback script
-   -- rollback_001_initial_schema.sql
-   DROP TABLE IF EXISTS pets CASCADE;
-   DROP TABLE IF EXISTS profiles CASCADE;
-   -- ... etc
-   \`\`\`
-
-## Production Checklist
-
-### Pre-Deployment
-- [ ] All environment variables configured
-- [ ] Database migrations tested
-- [ ] Authentication flow tested
-- [ ] Email templates updated
-- [ ] OAuth providers configured
-- [ ] Security settings enabled
-- [ ] Performance optimizations applied
-
-### Post-Deployment
-- [ ] Domain configured and SSL active
-- [ ] Authentication working end-to-end
-- [ ] Email confirmations working
-- [ ] Password reset working
-- [ ] OAuth signin working (if enabled)
-- [ ] Database queries performing well
-- [ ] Error tracking configured
-- [ ] Monitoring set up
-- [ ] Backup strategy in place
-
-### Ongoing Maintenance
-- [ ] Monitor error logs daily
-- [ ] Review performance metrics weekly
-- [ ] Update dependencies monthly
-- [ ] Review security settings quarterly
-- [ ] Test backup/restore procedures quarterly
+### File Backups
+- Vercel Blob provides durability
+- Consider cross-region replication for critical files
+- Implement file versioning if needed
 
 ## Troubleshooting
 
-### Common Issues
+### Common Deployment Issues
+1. **Build failures**: Check dependency versions and TypeScript errors
+2. **Environment variables**: Verify all required variables are set
+3. **Database connection**: Check Supabase connection limits
+4. **File uploads**: Verify Blob storage configuration
+5. **Authentication**: Check Supabase redirect URLs
 
-**1. Authentication redirects failing**
-- Check Supabase redirect URLs
-- Verify NEXT_PUBLIC_SITE_URL is correct
-- Test with curl/Postman
+### Debugging Tools
+- Vercel deployment logs
+- Supabase dashboard logs
+- Browser developer tools
+- Application error tracking
 
-**2. Database connection issues**
-- Verify Supabase credentials
-- Check connection pooling settings
-- Monitor connection limits
+## Support and Maintenance
 
-**3. Email delivery problems**
-- Check Resend API key and domain
-- Verify email templates
-- Check spam folders
+### Regular Maintenance
+- Update dependencies monthly
+- Monitor security advisories
+- Review and optimize database queries
+- Clean up unused files and data
 
-**4. Performance issues**
-- Review database query performance
-- Check image optimization
-- Monitor bundle size
+### Performance Optimization
+- Regular performance audits
+- Database query optimization
+- Image optimization
+- Bundle size monitoring
 
-### Support Resources
+### Security Updates
+- Keep all dependencies updated
+- Regular security audits
+- Monitor authentication logs
+- Review access permissions
 
-- Vercel Documentation: https://vercel.com/docs
-- Supabase Documentation: https://supabase.com/docs
-- Next.js Documentation: https://nextjs.org/docs
-- FluffyPet Support: [Your support channel]
+## Rollback Procedures
 
----
+### Application Rollback
+\`\`\`bash
+# Rollback to previous deployment
+vercel rollback [deployment-url]
+\`\`\`
 
-**Last Updated:** December 2024
-**Version:** 1.0
+### Database Rollback
+- Use Supabase point-in-time recovery
+- Restore from backup if needed
+- Test rollback procedures regularly
+
+## Contact and Support
+For deployment issues:
+1. Check Vercel deployment logs
+2. Review Supabase dashboard
+3. Consult documentation
+4. Contact platform support team

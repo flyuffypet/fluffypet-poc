@@ -1,17 +1,36 @@
 import { NextResponse } from "next/server"
-import { getDownloadUrl } from "@vercel/blob"
+import { getSupabaseServerClient } from "@/lib/supabase-server"
 
-// Signs a given Blob URL for temporary, permissioned access.
 export async function POST(req: Request) {
   try {
-    const { url } = await req.json()
-    if (!url) return NextResponse.json({ error: "Missing url" }, { status: 400 })
+    const { path, bucket = "media", expiresIn = 3600 } = await req.json()
 
-    // In a real app, validate that the requester is allowed to see this media (via Supabase auth/ACL).
-    // For PoC, we sign directly.
-    const { url: signed } = await getDownloadUrl(url)
-    return NextResponse.json({ url: signed })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    if (!path) {
+      return NextResponse.json({ error: "path is required" }, { status: 400 })
+    }
+
+    const supabase = getSupabaseServerClient()
+
+    // Check authentication
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Create signed URL for download
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
+
+    if (error) {
+      return NextResponse.json({ error: `Failed to create signed URL: ${error.message}` }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      signedUrl: data.signedUrl,
+    })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

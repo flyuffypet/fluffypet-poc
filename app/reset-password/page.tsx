@@ -93,8 +93,8 @@ export default function ResetPasswordPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Set New Password</CardTitle>
-            <CardDescription>Choose a strong password for your account</CardDescription>
+            <CardTitle className="text-center">Reset Your Password</CardTitle>
+            <CardDescription className="text-center">Enter your new password below</CardDescription>
           </CardHeader>
           <CardContent>
             <Suspense fallback={<div>Loading...</div>}>

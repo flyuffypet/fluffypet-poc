@@ -3,6 +3,8 @@
  * Handles redirect URLs and auth flow configuration
  */
 
+import { createClient } from "@/lib/supabase-client"
+
 interface AuthConfig {
   siteUrl: string
   redirectUrls: {
@@ -11,20 +13,23 @@ interface AuthConfig {
     signOut: string
     passwordReset: string
     emailChange: string
+    callback: string
   }
+  emailRedirectTo: string
 }
 
-export const getAuthRedirectUrl = (path = "/dashboard") => {
+export const getAuthRedirectUrl = () => {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-  return `${baseUrl}/auth/callback?next=${encodeURIComponent(path)}`
+  return `${baseUrl}/auth/callback`
 }
 
 export const getSignupRedirectUrl = () => {
   return getAuthRedirectUrl("/onboarding")
 }
 
-export const getPasswordResetRedirectUrl = () => {
-  return getAuthRedirectUrl("/reset-password")
+export const getPasswordResetUrl = () => {
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+  return `${baseUrl}/reset-password`
 }
 
 export const getMagicLinkRedirectUrl = () => {
@@ -66,9 +71,11 @@ export const authConfig = {
     signUp: getSignupRedirectUrl(),
     signIn: getAuthRedirectUrl("/dashboard"),
     signOut: getSiteUrl(),
-    passwordReset: getPasswordResetRedirectUrl(),
+    passwordReset: getPasswordResetUrl(),
     emailChange: getAuthRedirectUrl("/auth/callback"),
+    callback: getAuthRedirectUrl(),
   },
+  emailRedirectTo: getAuthRedirectUrl(),
 }
 
 export function getAuthConfig(): AuthConfig {
@@ -82,7 +89,9 @@ export function getAuthConfig(): AuthConfig {
       signOut: `${siteUrl}/`,
       passwordReset: `${siteUrl}/reset-password`,
       emailChange: `${siteUrl}/auth/callback`,
+      callback: `${siteUrl}/auth/callback`,
     },
+    emailRedirectTo: `${siteUrl}/auth/callback`,
   }
 }
 
@@ -129,5 +138,13 @@ export function isValidRedirectUrl(url: string): boolean {
     return allowedDomains.some((domain) => urlObj.origin === domain)
   } catch {
     return false
+  }
+}
+
+export async function signOut() {
+  const supabase = createClient()
+  const { error } = await supabase.auth.signOut()
+  if (error) {
+    throw error
   }
 }
