@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
+import { getSignupRedirectUrl } from "@/lib/auth-config"
 
 function createSupabaseServerClient() {
   const cookieStore = cookies()
@@ -127,9 +128,7 @@ export async function signUp(email: string, password: string) {
       email,
       password,
       options: {
-        emailRedirectTo:
-          process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-          `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/auth/callback?next=${encodeURIComponent("/onboarding")}`,
+        emailRedirectTo: getSignupRedirectUrl(),
       },
     })
 
@@ -283,5 +282,29 @@ export async function completeOnboarding() {
   } catch (error) {
     console.error("Onboarding completion error:", error)
     return { error: "Failed to complete onboarding" }
+  }
+}
+
+export async function resetPassword(email: string) {
+  if (!email) {
+    return { error: "Email is required" }
+  }
+
+  const supabase = createSupabaseServerClient()
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
+    })
+
+    if (error) {
+      console.error("Password reset error:", error)
+      return { error: error.message }
+    }
+
+    return { success: "Check your email for password reset instructions." }
+  } catch (error) {
+    console.error("Password reset error:", error)
+    return { error: "An unexpected error occurred. Please try again." }
   }
 }
