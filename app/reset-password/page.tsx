@@ -1,46 +1,41 @@
 "use client"
 
 import type React from "react"
-
+import { Suspense } from "react"
 import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { useRouter, useSearchParams } from "next/navigation"
+import { createClient } from "@/lib/supabase-client"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useToast } from "@/hooks/use-toast"
+import { Logo } from "@/components/ui/logo"
+import { ResetPasswordForm } from "@/components/auth/reset-password-form"
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
-  const supabase = createClientComponentClient()
-  const { toast } = useToast()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const supabase = createClient()
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setLoading(true)
+    setError(null)
 
     if (password !== confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Passwords do not match",
-        variant: "destructive",
-      })
+      setError("Passwords do not match")
+      setLoading(false)
       return
     }
 
     if (password.length < 6) {
-      toast({
-        title: "Error",
-        description: "Password must be at least 6 characters long",
-        variant: "destructive",
-      })
+      setError("Password must be at least 6 characters")
+      setLoading(false)
       return
     }
-
-    setIsLoading(true)
 
     try {
       const { error } = await supabase.auth.updateUser({
@@ -48,68 +43,66 @@ export default function ResetPasswordPage() {
       })
 
       if (error) {
-        toast({
-          title: "Error",
-          description: error.message,
-          variant: "destructive",
-        })
+        setError(error.message)
       } else {
-        toast({
-          title: "Success",
-          description: "Your password has been updated successfully",
-        })
-        router.push("/dashboard")
+        setSuccess(true)
+        setTimeout(() => {
+          router.push("/dashboard")
+        }, 2000)
       }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
+    } catch (err) {
+      setError("An unexpected error occurred")
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
+  }
+
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <Logo className="mx-auto h-12 w-auto" />
+            <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Password Updated!</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Your password has been successfully updated. Redirecting to dashboard...
+            </p>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-center text-green-600">Password Updated!</CardTitle>
+              <CardDescription className="text-center">
+                Your password has been successfully updated. Redirecting to dashboard...
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Reset Your Password</CardTitle>
-          <CardDescription>Enter your new password below</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleResetPassword} className="space-y-4">
-            <div>
-              <Label htmlFor="password">New Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                placeholder="Enter your new password"
-              />
-            </div>
-            <div>
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                minLength={6}
-                placeholder="Confirm your new password"
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Updating..." : "Update Password"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="max-w-md w-full space-y-8">
+        <div className="text-center">
+          <Logo className="mx-auto h-12 w-auto" />
+          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Reset your password</h2>
+          <p className="mt-2 text-sm text-gray-600">Enter your new password below</p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Set New Password</CardTitle>
+            <CardDescription>Choose a strong password for your account</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Suspense fallback={<div>Loading...</div>}>
+              <ResetPasswordForm />
+            </Suspense>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

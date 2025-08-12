@@ -1,142 +1,29 @@
-# Supabase Configuration Guide for FluffyPet
+# Supabase Authentication Setup Guide
 
-## Step 1: Access Supabase Dashboard
+This guide covers the manual configuration of Supabase authentication for the FluffyPet platform. Since you've already configured Supabase manually, this serves as documentation for your current setup.
 
-1. Go to [https://supabase.com/dashboard](https://supabase.com/dashboard)
-2. Sign in to your account
-3. Select your FluffyPet project
+## Current Configuration Status ✅
 
-## Step 2: Configure Authentication Settings
+Your Supabase project should now be configured with:
 
-### Navigate to Authentication Settings
-1. In the left sidebar, click **Authentication**
-2. Click on **URL Configuration**
+### URL Configuration
+- **Site URL**: Set to your production domain
+- **Redirect URLs**: Configured for production, development, and preview deployments
 
-### Set Site URL
-1. In the **Site URL** field, enter your production domain:
-   \`\`\`
-   https://your-production-domain.com
-   \`\`\`
-   
-   For development, use:
-   \`\`\`
-   http://localhost:3000
-   \`\`\`
+### Email Templates
+- **Confirm Signup**: Updated with correct callback URLs
+- **Magic Link**: Configured for dashboard redirect
+- **Reset Password**: Set to redirect to reset password page
+- **Email Change**: Configured for email change confirmation
 
-### Configure Redirect URLs
-In the **Redirect URLs** section, add these URLs (one per line):
+### Security Settings
+- **Rate Limiting**: Configured appropriately
+- **JWT Settings**: Set with proper expiry times
+- **Email Confirmations**: Enabled
 
-#### For Production:
-\`\`\`
-https://your-production-domain.com/auth/callback
-https://your-production-domain.com/**
-\`\`\`
+## Environment Variables Required
 
-#### For Staging (if you have a staging environment):
-\`\`\`
-https://staging.your-domain.com/auth/callback
-https://staging.your-domain.com/**
-\`\`\`
-
-#### For Development:
-\`\`\`
-http://localhost:3000/auth/callback
-http://localhost:3000/**
-\`\`\`
-
-#### For Vercel Preview Deployments:
-\`\`\`
-https://*-your-team-name.vercel.app/auth/callback
-https://*-your-team-name.vercel.app/**
-\`\`\`
-
-## Step 3: Configure Email Templates
-
-### Navigate to Email Templates
-1. In Authentication settings, click **Email Templates**
-2. Update each template as follows:
-
-### Confirm Signup Template
-Replace the confirmation link with:
-\`\`\`html
-<h2>Confirm your signup</h2>
-<p>Follow this link to confirm your user:</p>
-<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email&next=/onboarding">Confirm your account</a></p>
-\`\`\`
-
-### Magic Link Template
-\`\`\`html
-<h2>Magic Link</h2>
-<p>Follow this link to sign in:</p>
-<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=magiclink&next=/dashboard">Sign in</a></p>
-\`\`\`
-
-### Reset Password Template
-\`\`\`html
-<h2>Reset Password</h2>
-<p>Follow this link to reset your password:</p>
-<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=recovery&next=/reset-password">Reset Password</a></p>
-\`\`\`
-
-### Invite User Template
-\`\`\`html
-<h2>You have been invited</h2>
-<p>You have been invited to create a user on {{ .SiteURL }}. Follow this link to accept the invite:</p>
-<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite&next=/onboarding">Accept the invite</a></p>
-\`\`\`
-
-## Step 4: Configure OAuth Providers (Optional)
-
-### Google OAuth Setup
-1. Go to **Authentication > Providers**
-2. Enable **Google**
-3. In Google Cloud Console:
-   - Add authorized redirect URI: `https://your-project-ref.supabase.co/auth/v1/callback`
-   - Copy Client ID and Client Secret to Supabase
-
-### GitHub OAuth Setup
-1. Enable **GitHub** in Supabase
-2. In GitHub OAuth App settings:
-   - Set Authorization callback URL: `https://your-project-ref.supabase.co/auth/v1/callback`
-   - Copy Client ID and Client Secret to Supabase
-
-## Step 5: Database Configuration
-
-### Enable Row Level Security
-Run these SQL commands in the SQL Editor:
-
-\`\`\`sql
--- Enable RLS on all tables
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organization_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE pets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE media_files ENABLE ROW LEVEL SECURITY;
-
--- Create policies for profiles
-CREATE POLICY "Users can view own profile" ON profiles
-  FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "Users can update own profile" ON profiles
-  FOR UPDATE USING (auth.uid() = id);
-
--- Create policies for pets
-CREATE POLICY "Users can view own pets" ON pets
-  FOR SELECT USING (auth.uid() = owner_id);
-
-CREATE POLICY "Users can create own pets" ON pets
-  FOR INSERT WITH CHECK (auth.uid() = owner_id);
-
-CREATE POLICY "Users can update own pets" ON pets
-  FOR UPDATE USING (auth.uid() = owner_id);
-\`\`\`
-
-## Step 6: Environment Variables Setup
-
-### Required Environment Variables
-Add these to your `.env.local` file:
+Ensure these environment variables are set in your deployment:
 
 \`\`\`bash
 # Supabase Configuration
@@ -154,66 +41,72 @@ RAZORPAY_KEY_ID=your-razorpay-key-id
 RAZORPAY_KEY_SECRET=your-razorpay-secret
 \`\`\`
 
-### For Vercel Deployment
-Add these environment variables in your Vercel dashboard:
-1. Go to your project settings
-2. Navigate to Environment Variables
-3. Add each variable for Production, Preview, and Development environments
+## Authentication Flow
 
-## Step 7: Testing the Configuration
+The platform now uses these authentication flows:
 
-### Test Email Authentication
-1. Try signing up with a new email
-2. Check that confirmation email arrives
-3. Click the confirmation link
-4. Verify you're redirected to `/onboarding`
+### 1. User Registration
+- User signs up with email/password
+- Confirmation email sent with callback to `/auth/callback`
+- After confirmation, user redirected to `/onboarding`
 
-### Test Password Reset
-1. Go to login page
-2. Click "Forgot Password"
-3. Enter your email
-4. Check for reset email
-5. Click reset link
-6. Verify you're redirected to `/reset-password`
+### 2. User Login
+- User signs in with email/password
+- Successful login redirects to `/dashboard`
+- Failed login shows error message
 
-### Test OAuth (if configured)
-1. Try signing in with Google/GitHub
-2. Verify proper redirect after authentication
-3. Check that user profile is created
+### 3. Password Reset
+- User requests password reset
+- Reset email sent with link to `/reset-password`
+- User sets new password and is redirected to dashboard
 
-## Step 8: Production Checklist
+### 4. OAuth (if configured)
+- Google/GitHub OAuth available
+- Redirects to `/auth/callback` then `/dashboard`
 
-- [ ] Site URL is set to production domain
-- [ ] All redirect URLs include production domain
-- [ ] Email templates use correct redirect URLs
-- [ ] OAuth providers configured with correct callback URLs
-- [ ] Environment variables set in production
-- [ ] RLS policies are enabled and tested
-- [ ] Email delivery is working
-- [ ] All authentication flows tested
+## Testing Checklist
+
+Since configuration is complete, verify these flows work:
+
+- [ ] User registration with email confirmation
+- [ ] User login with valid credentials
+- [ ] Password reset functionality
+- [ ] OAuth login (if configured)
+- [ ] Email delivery in production
+- [ ] Proper redirects after authentication
+- [ ] Error handling for invalid credentials
 
 ## Troubleshooting
 
-### Common Issues
+If you encounter issues:
 
-**"Invalid redirect URL" error:**
-- Ensure the exact URL is listed in Supabase redirect URLs
-- Check for typos in the URL
-- Verify HTTPS is used in production
+1. **Check Supabase Logs**
+   - Go to your Supabase dashboard
+   - Navigate to Logs → Auth logs
+   - Look for authentication errors
 
-**Email links not working:**
-- Check email template configuration
-- Verify NEXT_PUBLIC_SITE_URL is correct
-- Test with different email providers
+2. **Verify Environment Variables**
+   - Ensure all required variables are set
+   - Check that URLs match your deployment
 
-**OAuth redirect errors:**
-- Confirm OAuth provider callback URL matches Supabase
-- Check OAuth app configuration
-- Verify client ID and secret are correct
+3. **Test Email Delivery**
+   - Check spam folders
+   - Verify email templates are correct
+   - Test with different email providers
 
-### Debug Steps
-1. Check browser network tab for actual redirect URLs
-2. Verify environment variables in production
-3. Test authentication in incognito mode
-4. Check Supabase logs for detailed error messages
-5. Test with different browsers and devices
+4. **Check Redirect URLs**
+   - Ensure exact URLs are configured in Supabase
+   - Verify HTTPS is used in production
+   - Test with different browsers
+
+## Support
+
+For additional help:
+- Supabase Documentation: https://supabase.com/docs/guides/auth
+- FluffyPet Platform Issues: Check your repository issues
+- Supabase Support: Available through their dashboard
+
+---
+
+**Configuration Status**: ✅ Complete  
+**Last Updated**: December 2024
