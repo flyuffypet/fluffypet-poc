@@ -1,7 +1,23 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import { getRateLimitIdentifier, apiRateLimiter } from "./lib/rate-limiter"
 
 export async function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    const identifier = getRateLimitIdentifier(request)
+    const { allowed, resetTime } = apiRateLimiter.isAllowed(identifier)
+
+    if (!allowed) {
+      return new NextResponse(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "X-RateLimit-Reset": resetTime?.toString() || "",
+        },
+      })
+    }
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -68,11 +84,26 @@ export async function middleware(request: NextRequest) {
 
   const isPublicRoute = publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))
 
+  const redirectCount = Number.parseInt(request.headers.get("x-redirect-count") || "0")
+  const lastRedirectPath = request.headers.get("x-last-redirect-path")
+
+  // Detect redirect loops
+  if (redirectCount > 3 || (redirectCount > 1 && lastRedirectPath === pathname)) {
+    console.warn(`Redirect loop detected for ${pathname}, redirecting to fallback`)
+    const fallbackResponse = NextResponse.redirect(new URL("/", request.url))
+    fallbackResponse.headers.set("x-redirect-count", "0")
+    fallbackResponse.headers.delete("x-last-redirect-path")
+    return fallbackResponse
+  }
+
   // If user is not authenticated and trying to access protected route
   if (!user && !isPublicRoute) {
     const redirectUrl = new URL("/login", request.url)
     redirectUrl.searchParams.set("next", pathname)
-    return NextResponse.redirect(redirectUrl)
+    const redirectResponse = NextResponse.redirect(redirectUrl)
+    redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+    redirectResponse.headers.set("x-last-redirect-path", pathname)
+    return redirectResponse
   }
 
   // If user is authenticated, get their profile for role-based routing
@@ -91,8 +122,12 @@ export async function middleware(request: NextRequest) {
         profile?.platform_role === "superadmin"
 
       if (!hasAdminAccess) {
-        // Redirect non-admin users away from admin routes
-        return NextResponse.redirect(new URL("/dashboard", request.url))
+        // Redirect non-admin users to appropriate dashboard
+        const fallbackUrl = profile?.role ? "/dashboard" : "/onboarding"
+        const redirectResponse = NextResponse.redirect(new URL(fallbackUrl, request.url))
+        redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+        redirectResponse.headers.set("x-last-redirect-path", pathname)
+        return redirectResponse
       }
     }
 
@@ -100,24 +135,34 @@ export async function middleware(request: NextRequest) {
       const role = profile.role || profile.platform_role
 
       // Redirect to appropriate dashboard based on user role
+      let targetPath = "/dashboard" // Default fallback
+
       switch (role) {
         case "service_provider":
-          return NextResponse.redirect(new URL("/provider/dashboard", request.url))
-        case "veterinarian":
-          return NextResponse.redirect(new URL("/vet/dashboard", request.url))
-        case "admin":
-          if (profile.default_org_id) {
-            return NextResponse.redirect(new URL("/clinic/dashboard", request.url))
-          } else {
-            return NextResponse.redirect(new URL("/admin/dashboard", request.url))
-          }
-        case "volunteer":
-          return NextResponse.redirect(new URL("/volunteer/dashboard", request.url))
-        case "superadmin":
-          return NextResponse.redirect(new URL("/admin/dashboard", request.url))
-        default:
-          // Pet owners stay on /dashboard
+          targetPath = "/provider/dashboard"
           break
+        case "veterinarian":
+          targetPath = "/vet/dashboard"
+          break
+        case "admin":
+          targetPath = profile.default_org_id ? "/clinic/dashboard" : "/admin/dashboard"
+          break
+        case "volunteer":
+          targetPath = "/volunteer/dashboard"
+          break
+        case "superadmin":
+          targetPath = "/admin/dashboard"
+          break
+        default:
+          // Pet owners and others stay on /dashboard
+          return response
+      }
+
+      if (targetPath !== "/dashboard") {
+        const redirectResponse = NextResponse.redirect(new URL(targetPath, request.url))
+        redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+        redirectResponse.headers.set("x-last-redirect-path", pathname)
+        return redirectResponse
       }
     }
 
@@ -125,22 +170,31 @@ export async function middleware(request: NextRequest) {
       const userCreatedAt = new Date(user.created_at).getTime()
       const profileCreatedAt = profile?.created_at ? new Date(profile.created_at).getTime() : userCreatedAt
       const now = Date.now()
-      const tenMinutesAgo = now - 10 * 60 * 1000 // Extended to 10 minutes
+      const tenMinutesAgo = now - 10 * 60 * 1000
 
       // Only redirect to onboarding if user/profile was created recently
       if (userCreatedAt > tenMinutesAgo || profileCreatedAt > tenMinutesAgo) {
-        return NextResponse.redirect(new URL("/onboarding", request.url))
+        const redirectResponse = NextResponse.redirect(new URL("/onboarding", request.url))
+        redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+        redirectResponse.headers.set("x-last-redirect-path", pathname)
+        return redirectResponse
       } else {
         // Existing user without role - redirect to dashboard instead of onboarding
-        return NextResponse.redirect(new URL("/dashboard", request.url))
+        const redirectResponse = NextResponse.redirect(new URL("/dashboard", request.url))
+        redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+        redirectResponse.headers.set("x-last-redirect-path", pathname)
+        return redirectResponse
       }
     }
   }
 
   if (user && (pathname === "/login" || pathname === "/signup")) {
     const next = url.searchParams.get("next")
-    if (next) {
-      return NextResponse.redirect(new URL(next, request.url))
+    if (next && !next.startsWith("/login") && !next.startsWith("/signup")) {
+      const redirectResponse = NextResponse.redirect(new URL(next, request.url))
+      redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+      redirectResponse.headers.set("x-last-redirect-path", pathname)
+      return redirectResponse
     }
 
     // Get user profile to determine appropriate redirect
@@ -155,31 +209,46 @@ export async function middleware(request: NextRequest) {
 
       // If no role is set, redirect to onboarding
       if (!role) {
-        return NextResponse.redirect(new URL("/onboarding", request.url))
+        const redirectResponse = NextResponse.redirect(new URL("/onboarding", request.url))
+        redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+        redirectResponse.headers.set("x-last-redirect-path", pathname)
+        return redirectResponse
       }
+
+      let targetPath = "/dashboard" // Default fallback
 
       switch (role) {
         case "service_provider":
-          return NextResponse.redirect(new URL("/provider/dashboard", request.url))
+          targetPath = "/provider/dashboard"
+          break
         case "veterinarian":
-          return NextResponse.redirect(new URL("/vet/dashboard", request.url))
+          targetPath = "/vet/dashboard"
+          break
         case "admin":
-          if (profile.default_org_id) {
-            return NextResponse.redirect(new URL("/clinic/dashboard", request.url))
-          } else {
-            return NextResponse.redirect(new URL("/admin/dashboard", request.url))
-          }
+          targetPath = profile.default_org_id ? "/clinic/dashboard" : "/admin/dashboard"
+          break
         case "volunteer":
-          return NextResponse.redirect(new URL("/volunteer/dashboard", request.url))
+          targetPath = "/volunteer/dashboard"
+          break
         case "superadmin":
-          return NextResponse.redirect(new URL("/admin/dashboard", request.url))
-        default:
+          targetPath = "/admin/dashboard"
           break
       }
+
+      const redirectResponse = NextResponse.redirect(new URL(targetPath, request.url))
+      redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+      redirectResponse.headers.set("x-last-redirect-path", pathname)
+      return redirectResponse
     }
 
-    return NextResponse.redirect(new URL("/dashboard", request.url))
+    const redirectResponse = NextResponse.redirect(new URL("/dashboard", request.url))
+    redirectResponse.headers.set("x-redirect-count", (redirectCount + 1).toString())
+    redirectResponse.headers.set("x-last-redirect-path", pathname)
+    return redirectResponse
   }
+
+  response.headers.delete("x-redirect-count")
+  response.headers.delete("x-last-redirect-path")
 
   return response
 }
