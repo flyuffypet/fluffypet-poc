@@ -1,73 +1,58 @@
-import { createServerClient } from "@supabase/ssr"
-import { type NextRequest, NextResponse } from "next/server"
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
 import { cookies } from "next/headers"
+import { type NextRequest, NextResponse } from "next/server"
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get("code")
-  const next = searchParams.get("redirect") ?? "/dashboard"
+  const requestUrl = new URL(request.url)
+  const code = requestUrl.searchParams.get("code")
 
   if (code) {
     const cookieStore = cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookieStore.set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookieStore.delete({ name, ...options })
-          },
-        },
-      },
-    )
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
 
     try {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
       if (error) {
         console.error("Auth callback error:", error)
-        return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`)
+        return NextResponse.redirect(`${requestUrl.origin}/login?error=auth_callback_error`)
       }
 
       if (data.user) {
-        // Check if user profile exists, create if not
+        // Check if user profile exists
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("id")
+          .select("*")
           .eq("id", data.user.id)
           .single()
 
         if (profileError && profileError.code === "PGRST116") {
-          // Profile doesn't exist, create it
-          const { error: createError } = await supabase.from("profiles").insert({
+          // Profile doesn't exist, create one
+          const { error: insertError } = await supabase.from("profiles").insert({
             id: data.user.id,
             email: data.user.email,
-            full_name: data.user.user_metadata?.full_name || "",
-            avatar_url: data.user.user_metadata?.avatar_url || null,
-            role: "pet_owner",
+            full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || "",
+            avatar_url: data.user.user_metadata?.avatar_url || "",
+            role: "owner",
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
 
-          if (createError) {
-            console.error("Profile creation error:", createError)
+          if (insertError) {
+            console.error("Profile creation error:", insertError)
           }
         }
 
-        return NextResponse.redirect(`${origin}${next}`)
+        // Redirect to onboarding for new users or dashboard for existing users
+        const redirectTo = profile ? "/dashboard" : "/onboarding"
+        return NextResponse.redirect(`${requestUrl.origin}${redirectTo}`)
       }
     } catch (error) {
       console.error("Unexpected auth callback error:", error)
-      return NextResponse.redirect(`${origin}/login?error=unexpected_error`)
+      return NextResponse.redirect(`${requestUrl.origin}/login?error=unexpected_error`)
     }
   }
 
-  // Return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/login?error=no_code_provided`)
+  // Return the user to the login page if no code is present
+  return NextResponse.redirect(`${requestUrl.origin}/login`)
 }

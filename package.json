@@ -18,7 +18,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.3.2",
+    "@hookform/resolvers": "latest",
     "@novu/node": "latest",
     "@radix-ui/react-accordion": "^1.1.2",
     "@radix-ui/react-alert-dialog": "^1.0.5",
@@ -45,7 +45,6 @@
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
     "@sveltejs/kit": "latest",
-    "@testing-library/jest-dom": "latest",
     "@vercel/analytics": "latest",
     "@vercel/speed-insights": "latest",
     "@vis.gl/react-google-maps": "latest",
@@ -64,7 +63,7 @@
     "react-day-picker": "latest",
     "react-dom": "^19",
     "react-dropzone": "latest",
-    "react-hook-form": "^7.48.2",
+    "react-hook-form": "latest",
     "react-icons": "latest",
     "resend": "latest",
     "sonner": "latest",
@@ -76,6 +75,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "latest",
     "@types/jest": "^29.5.8",
     "@types/node": "^22",
     "@types/react": "^19",
@@ -90,8 +90,9 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
   },
+  "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
+    "pnpm": ">=9.0.0"
   }
 }
