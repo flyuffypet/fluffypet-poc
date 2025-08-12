@@ -1,108 +1,224 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { Deno } from "https://deno.land/std@0.168.0/node/global.ts" // Declare Deno variable
+import { corsHeaders } from "../_shared/cors.ts"
+import { trackFunctionCall } from "../_shared/monitoring.ts"
+import { Deno } from "https://deno.land/std@0.168.0/runtime.ts" // Declare Deno variable
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-}
+const supabaseUrl = Deno.env.get("SUPABASE_URL")!
+const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
 serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
   }
 
+  const startTime = Date.now()
+  let functionResult: any = null
+  let error: Error | null = null
+
   try {
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-    )
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const url = new URL(req.url)
+    const path = url.pathname.split("/").pop()
 
-    const { action, email, password, userData, newPassword } = await req.json()
+    // Health check endpoint
+    if (path === "health") {
+      try {
+        // Test database connectivity
+        const { data, error: dbError } = await supabase.from("users").select("count").limit(1).single()
 
-    switch (action) {
-      case "signup": {
-        const { data, error } = await supabaseClient.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          user_metadata: userData || {},
-        })
+        if (dbError) throw dbError
 
-        if (error) throw error
-
-        // Create user profile
-        const { error: profileError } = await supabaseClient.from("users").insert({
-          id: data.user.id,
-          email: data.user.email,
-          full_name: userData?.full_name || "",
-          role: userData?.role || "owner",
-          created_at: new Date().toISOString(),
-        })
-
-        if (profileError) {
-          console.error("Profile creation error:", profileError)
+        functionResult = {
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+          database: "connected",
+          responseTime: Date.now() - startTime,
         }
 
-        return new Response(JSON.stringify({ user: data.user }), {
+        return new Response(JSON.stringify(functionResult), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        })
+      } catch (healthError) {
+        error = healthError as Error
+        functionResult = {
+          status: "unhealthy",
+          timestamp: new Date().toISOString(),
+          database: "disconnected",
+          error: error.message,
+        }
+
+        return new Response(JSON.stringify(functionResult), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 503,
         })
       }
+    }
 
-      case "signin": {
-        const { data, error } = await supabaseClient.auth.signInWithPassword({
-          email,
-          password,
-        })
+    const { method } = req
+    const authHeader = req.headers.get("Authorization")
 
-        if (error) throw error
+    if (!authHeader) {
+      throw new Error("Authorization header required")
+    }
 
-        return new Response(JSON.stringify({ user: data.user, session: data.session }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
 
-      case "reset-password": {
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-          redirectTo: `${Deno.env.get("SITE_URL")}/reset-password`,
-        })
+    if (authError || !user) {
+      throw new Error("Invalid authentication token")
+    }
 
-        if (error) throw error
+    switch (method) {
+      case "POST": {
+        const body = await req.json()
+        const { action, ...data } = body
 
-        return new Response(JSON.stringify({ message: "Password reset email sent" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
+        switch (action) {
+          case "signup": {
+            const { email, password, userData } = data
 
-      case "update-password": {
-        const authHeader = req.headers.get("Authorization")
-        if (!authHeader) throw new Error("No authorization header")
+            const { data: authData, error: signupError } = await supabase.auth.signUp({
+              email,
+              password,
+              options: {
+                data: userData,
+              },
+            })
 
-        const {
-          data: { user },
-          error: authError,
-        } = await supabaseClient.auth.getUser(authHeader.replace("Bearer ", ""))
+            if (signupError) throw signupError
 
-        if (authError || !user) throw new Error("Unauthorized")
+            // Create user profile
+            if (authData.user) {
+              const { error: profileError } = await supabase.from("users").insert({
+                id: authData.user.id,
+                email: authData.user.email,
+                full_name: userData.full_name,
+                role: userData.role || "owner",
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
 
-        const { error } = await supabaseClient.auth.admin.updateUserById(user.id, {
-          password: newPassword,
-        })
+              if (profileError) throw profileError
+            }
 
-        if (error) throw error
+            functionResult = {
+              success: true,
+              user: authData.user,
+              message: "User created successfully",
+            }
+            break
+          }
 
-        return new Response(JSON.stringify({ message: "Password updated successfully" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
+          case "signin": {
+            const { email, password } = data
+
+            const { data: authData, error: signinError } = await supabase.auth.signInWithPassword({
+              email,
+              password,
+            })
+
+            if (signinError) throw signinError
+
+            functionResult = {
+              success: true,
+              user: authData.user,
+              session: authData.session,
+              message: "Signed in successfully",
+            }
+            break
+          }
+
+          case "reset-password": {
+            const { email } = data
+
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+              redirectTo: `${Deno.env.get("SITE_URL") || "http://localhost:3000"}/reset-password`,
+            })
+
+            if (resetError) throw resetError
+
+            functionResult = {
+              success: true,
+              message: "Password reset email sent",
+            }
+            break
+          }
+
+          case "update-password": {
+            const { password } = data
+
+            const { error: updateError } = await supabase.auth.updateUser({
+              password,
+            })
+
+            if (updateError) throw updateError
+
+            functionResult = {
+              success: true,
+              message: "Password updated successfully",
+            }
+            break
+          }
+
+          default:
+            throw new Error(`Unknown action: ${action}`)
+        }
+        break
       }
 
       default:
-        throw new Error("Invalid action")
+        throw new Error(`Method ${method} not allowed`)
     }
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+
+    // Track successful function call
+    await trackFunctionCall(supabase, {
+      function_name: "auth",
+      user_id: user.id,
+      action: req.method,
+      success: true,
+      response_time: Date.now() - startTime,
+      metadata: { path, action: (await req.clone().json()).action },
     })
+
+    return new Response(JSON.stringify(functionResult), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 200,
+    })
+  } catch (err) {
+    error = err as Error
+    console.error("Auth function error:", error)
+
+    // Track failed function call
+    try {
+      const supabase = createClient(supabaseUrl, supabaseServiceKey)
+      await trackFunctionCall(supabase, {
+        function_name: "auth",
+        user_id: null,
+        action: req.method,
+        success: false,
+        response_time: Date.now() - startTime,
+        error_message: error.message,
+        metadata: { error: error.stack },
+      })
+    } catch (trackingError) {
+      console.error("Failed to track error:", trackingError)
+    }
+
+    return new Response(
+      JSON.stringify({
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      },
+    )
   }
 })

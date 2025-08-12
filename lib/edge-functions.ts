@@ -3,223 +3,272 @@ import { createClient } from "@supabase/supabase-js"
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
-
-// Edge Function URLs
-const EDGE_FUNCTION_BASE_URL = `${supabaseUrl}/functions/v1`
-
-// Helper function to call edge functions
-async function callEdgeFunction(functionName: string, payload: any, authToken?: string) {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  }
-
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`
-  }
-
-  const response = await fetch(`${EDGE_FUNCTION_BASE_URL}/${functionName}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || "Edge function call failed")
-  }
-
-  return response.json()
+export interface EdgeFunctionResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+  timestamp?: string
 }
 
-// Authentication functions
-export const authFunctions = {
-  async signUp(email: string, password: string, userData?: any) {
-    return callEdgeFunction("auth", {
-      action: "signup",
-      email,
-      password,
-      userData,
-    })
-  },
-
-  async signIn(email: string, password: string) {
-    return callEdgeFunction("auth", {
-      action: "signin",
-      email,
-      password,
-    })
-  },
-
-  async resetPassword(email: string) {
-    return callEdgeFunction("auth", {
-      action: "reset-password",
-      email,
-    })
-  },
-
-  async updatePassword(newPassword: string, authToken: string) {
-    return callEdgeFunction(
-      "auth",
-      {
-        action: "update-password",
-        newPassword,
-      },
-      authToken,
-    )
-  },
+export interface AuthSignupData {
+  email: string
+  password: string
+  userData: {
+    full_name: string
+    role: string
+  }
 }
 
-// Media functions
-export const mediaFunctions = {
-  async generateUploadUrl(fileName: string, fileType: string, folder?: string, authToken?: string) {
-    return callEdgeFunction(
-      "media",
-      {
-        action: "generate-upload-url",
-        fileName,
-        fileType,
-        folder,
-      },
-      authToken,
-    )
-  },
-
-  async createSignedUrl(filePath: string, expiresIn = 3600, authToken?: string) {
-    return callEdgeFunction(
-      "media",
-      {
-        action: "create-signed-url",
-        filePath,
-        expiresIn,
-      },
-      authToken,
-    )
-  },
-
-  async deleteFile(filePath: string, authToken?: string) {
-    return callEdgeFunction(
-      "media",
-      {
-        action: "delete-file",
-        filePath,
-      },
-      authToken,
-    )
-  },
-
-  async saveMediaRecord(
-    petId: string,
-    mediaType: string,
-    description: string,
-    storagePath: string,
-    publicUrl: string,
-    authToken?: string,
-  ) {
-    return callEdgeFunction(
-      "media",
-      {
-        action: "save-media-record",
-        petId,
-        mediaType,
-        description,
-        storagePath,
-        publicUrl,
-      },
-      authToken,
-    )
-  },
+export interface AuthSigninData {
+  email: string
+  password: string
 }
 
-// Chat functions
-export const chatFunctions = {
-  async createConversation(recipientId: string, authToken: string) {
-    return callEdgeFunction(
-      "chat",
-      {
-        action: "create-conversation",
-        recipientId,
-      },
-      authToken,
-    )
-  },
+export interface MediaUploadData {
+  fileName: string
+  fileType: string
+  petId?: string
+  fileSize?: number
+}
 
-  async sendMessage(conversationId: string, message: string, messageType = "text", authToken?: string) {
-    return callEdgeFunction(
-      "chat",
-      {
-        action: "send-message",
+export interface ChatMessageData {
+  conversationId: string
+  content: string
+  messageType?: "text" | "image" | "file"
+}
+
+export interface AIAnalysisData {
+  petId: string
+  symptoms?: string
+  context?: string
+}
+
+export class EdgeFunctionsClient {
+  private supabase = createClient(supabaseUrl, supabaseAnonKey)
+  private baseUrl: string
+
+  constructor() {
+    this.baseUrl = `${supabaseUrl}/functions/v1`
+  }
+
+  private async makeRequest<T>(
+    functionName: string,
+    options: {
+      method?: "GET" | "POST" | "PUT" | "DELETE"
+      body?: any
+      params?: Record<string, string>
+    } = {},
+  ): Promise<EdgeFunctionResponse<T>> {
+    try {
+      const {
+        data: { session },
+      } = await this.supabase.auth.getSession()
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`
+      }
+
+      let url = `${this.baseUrl}/${functionName}`
+      if (options.params) {
+        const searchParams = new URLSearchParams(options.params)
+        url += `?${searchParams.toString()}`
+      }
+
+      const response = await fetch(url, {
+        method: options.method || "POST",
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: result.error || `HTTP ${response.status}`,
+          timestamp: result.timestamp,
+        }
+      }
+
+      return {
+        success: true,
+        data: result,
+        timestamp: result.timestamp,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      }
+    }
+  }
+
+  // Auth Functions
+  async signup(data: AuthSignupData): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("auth", {
+      method: "POST",
+      body: { action: "signup", ...data },
+    })
+  }
+
+  async signin(data: AuthSigninData): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("auth", {
+      method: "POST",
+      body: { action: "signin", ...data },
+    })
+  }
+
+  async resetPassword(email: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("auth", {
+      method: "POST",
+      body: { action: "reset-password", email },
+    })
+  }
+
+  async updatePassword(password: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("auth", {
+      method: "POST",
+      body: { action: "update-password", password },
+    })
+  }
+
+  // Media Functions
+  async generateUploadUrl(data: MediaUploadData): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("media", {
+      method: "POST",
+      body: { action: "generate-upload-url", ...data },
+    })
+  }
+
+  async generateSignedUrl(filePath: string, expiresIn = 3600): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("media", {
+      method: "POST",
+      body: { action: "generate-signed-url", filePath, expiresIn },
+    })
+  }
+
+  async confirmUpload(mediaId: string, metadata?: any): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("media", {
+      method: "POST",
+      body: { action: "confirm-upload", mediaId, metadata },
+    })
+  }
+
+  async deleteFile(filePath: string, mediaId?: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("media", {
+      method: "POST",
+      body: { action: "delete-file", filePath, mediaId },
+    })
+  }
+
+  async listMedia(petId?: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("media", {
+      method: "GET",
+      params: { action: "list-media", ...(petId && { petId }) },
+    })
+  }
+
+  // Chat Functions
+  async createConversation(participantId: string, bookingId?: string, title?: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("chat", {
+      method: "POST",
+      body: { action: "create-conversation", participantId, bookingId, title },
+    })
+  }
+
+  async sendMessage(data: ChatMessageData): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("chat", {
+      method: "POST",
+      body: { action: "send-message", ...data },
+    })
+  }
+
+  async markAsRead(conversationId: string, messageId?: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("chat", {
+      method: "POST",
+      body: { action: "mark-as-read", conversationId, messageId },
+    })
+  }
+
+  async listConversations(): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("chat", {
+      method: "GET",
+      params: { action: "list-conversations" },
+    })
+  }
+
+  async getMessages(conversationId: string, limit = 50, offset = 0): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("chat", {
+      method: "GET",
+      params: {
+        action: "get-messages",
         conversationId,
-        message,
-        messageType,
+        limit: limit.toString(),
+        offset: offset.toString(),
       },
-      authToken,
-    )
-  },
+    })
+  }
 
-  async markRead(conversationId: string, authToken?: string) {
-    return callEdgeFunction(
-      "chat",
-      {
-        action: "mark-read",
-        conversationId,
-      },
-      authToken,
-    )
-  },
+  // AI Functions
+  async analyzePetHealth(data: AIAnalysisData): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("ai", {
+      method: "POST",
+      body: { action: "analyze-pet-health", ...data },
+    })
+  }
 
-  async getConversations(authToken?: string) {
-    return callEdgeFunction(
-      "chat",
-      {
-        action: "get-conversations",
+  async generateCareTips(petId: string, category = "general"): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("ai", {
+      method: "POST",
+      body: { action: "generate-care-tips", petId, category },
+    })
+  }
+
+  async generalQuery(query: string, petId?: string): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("ai", {
+      method: "POST",
+      body: { action: "general-query", query, petId },
+    })
+  }
+
+  async getAnalyses(petId?: string, limit = 10): Promise<EdgeFunctionResponse> {
+    return this.makeRequest("ai", {
+      method: "GET",
+      params: {
+        action: "get-analyses",
+        ...(petId && { petId }),
+        limit: limit.toString(),
       },
-      authToken,
+    })
+  }
+
+  // Health Check Functions
+  async checkHealth(functionName: "auth" | "media" | "chat" | "ai"): Promise<EdgeFunctionResponse> {
+    return this.makeRequest(`${functionName}/health`, {
+      method: "GET",
+    })
+  }
+
+  async checkAllHealth(): Promise<Record<string, EdgeFunctionResponse>> {
+    const functions = ["auth", "media", "chat", "ai"] as const
+    const results: Record<string, EdgeFunctionResponse> = {}
+
+    await Promise.all(
+      functions.map(async (func) => {
+        results[func] = await this.checkHealth(func)
+      }),
     )
-  },
+
+    return results
+  }
 }
 
-// AI functions
-export const aiFunctions = {
-  async analyzeHealth(petId: string, symptoms?: string, authToken?: string) {
-    return callEdgeFunction(
-      "ai",
-      {
-        action: "analyze-pet-health",
-        petId,
-        symptoms,
-      },
-      authToken,
-    )
-  },
+// Export singleton instance
+export const edgeFunctions = new EdgeFunctionsClient()
 
-  async generateCareTips(petId: string, authToken?: string) {
-    return callEdgeFunction(
-      "ai",
-      {
-        action: "generate-care-tips",
-        petId,
-      },
-      authToken,
-    )
-  },
-
-  async generalQuery(question: string, authToken?: string) {
-    return callEdgeFunction(
-      "ai",
-      {
-        action: "general-query",
-        question,
-      },
-      authToken,
-    )
-  },
-}
-
-// Helper to get current user's auth token
-export async function getCurrentUserToken() {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  return session?.access_token
-}
+// Export types
+export type { EdgeFunctionResponse, AuthSignupData, AuthSigninData, MediaUploadData, ChatMessageData, AIAnalysisData }

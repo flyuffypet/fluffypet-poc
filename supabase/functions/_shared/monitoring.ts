@@ -1,103 +1,56 @@
-import { MonitoringService, withMonitoring, healthCheck } from "../../../lib/monitoring.ts"
-import { Deno } from "https://deno.land/std@0.166.0/node/global.ts"
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-// Initialize monitoring service for Edge Functions
-const monitoring = new MonitoringService(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!)
-
-// CORS headers for Edge Functions
-export const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+export interface FunctionCallData {
+  function_name: string
+  user_id: string | null
+  action: string
+  success: boolean
+  response_time: number
+  error_message?: string
+  metadata?: Record<string, any>
 }
 
-// Wrapper for Edge Functions with monitoring
-export async function withEdgeFunctionMonitoring<T>(
-  functionName: string,
-  action: string,
-  handler: () => Promise<T>,
-  userId?: string,
-): Promise<Response> {
+export async function trackFunctionCall(supabase: SupabaseClient, data: FunctionCallData): Promise<void> {
   try {
-    const result = await withMonitoring(functionName, action, handler, userId)
-
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
+    await supabase.from("function_calls").insert({
+      id: crypto.randomUUID(),
+      function_name: data.function_name,
+      user_id: data.user_id,
+      action: data.action,
+      success: data.success,
+      response_time: data.response_time,
+      error_message: data.error_message,
+      metadata: data.metadata || {},
+      created_at: new Date().toISOString(),
     })
   } catch (error) {
-    console.error(`Error in ${functionName}:`, error)
+    console.error("Failed to track function call:", error)
+    // Don't throw - monitoring failures shouldn't break the main function
+  }
+}
 
-    return new Response(
-      JSON.stringify({
-        error: error.message,
-        function: functionName,
-        action,
-      }),
+export async function updateSystemHealth(
+  supabase: SupabaseClient,
+  component: string,
+  status: "healthy" | "degraded" | "down",
+  responseTime?: number,
+  errorMessage?: string,
+): Promise<void> {
+  try {
+    await supabase.from("system_health").upsert(
       {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 500,
+        component,
+        status,
+        last_check: new Date().toISOString(),
+        response_time: responseTime,
+        error_message: errorMessage,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "component",
       },
     )
+  } catch (error) {
+    console.error("Failed to update system health:", error)
   }
 }
-
-// Health check endpoint for Edge Functions
-export async function createHealthCheckEndpoint(serviceName: string) {
-  return async (req: Request): Promise<Response> => {
-    if (req.method === "OPTIONS") {
-      return new Response("ok", { headers: corsHeaders })
-    }
-
-    try {
-      await healthCheck(serviceName, async () => {
-        // Simple health check - verify database connection
-        const { data, error } = await monitoring.supabase.from("profiles").select("count").limit(1)
-
-        return !error
-      })
-
-      return new Response(
-        JSON.stringify({
-          status: "healthy",
-          service: serviceName,
-          timestamp: new Date().toISOString(),
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 200,
-        },
-      )
-    } catch (error) {
-      return new Response(
-        JSON.stringify({
-          status: "unhealthy",
-          service: serviceName,
-          error: error.message,
-          timestamp: new Date().toISOString(),
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 503,
-        },
-      )
-    }
-  }
-}
-
-// Utility to extract user ID from JWT token
-export function extractUserIdFromRequest(req: Request): string | undefined {
-  try {
-    const authHeader = req.headers.get("authorization")
-    if (!authHeader) return undefined
-
-    const token = authHeader.replace("Bearer ", "")
-    const payload = JSON.parse(atob(token.split(".")[1]))
-    return payload.sub
-  } catch {
-    return undefined
-  }
-}
-
-// Export monitoring instance for direct use
-export { monitoring }
