@@ -1,80 +1,98 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
-import { Activity, AlertTriangle, CheckCircle, Clock, TrendingUp, RefreshCw, Server, Zap } from "lucide-react"
-import { getSupabaseBrowserClient } from "@/lib/supabase-client"
-import { EdgeFunctionMonitor } from "@/lib/monitoring"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  TrendingUp,
+  XCircle,
+  RefreshCw,
+  Zap,
+  Database,
+  MessageSquare,
+  Brain,
+} from "lucide-react"
+import { monitoring, type ErrorLog } from "@/lib/monitoring"
 
-interface MetricData {
-  function_name: string
-  action: string
-  total_calls: number
-  avg_duration: number
-  success_rate: number
-  error_count: number
-  p95_duration: number
+interface MetricsSummary {
+  totalRequests: number
+  successRate: number
+  avgResponseTime: number
+  p95ResponseTime: number
+  p99ResponseTime: number
+  errorCount: number
 }
 
-interface HealthCheck {
-  service_name: string
-  status: string
-  avg_response_time: number
-  last_check: string
-  healthy_count: number
-  degraded_count: number
-  down_count: number
+interface SystemHealth {
+  services: Array<{
+    name: string
+    status: "healthy" | "degraded" | "down"
+    lastCheck: string
+    responseTime: number
+  }>
+  overallStatus: "healthy" | "degraded" | "down"
 }
 
-export default function MonitoringDashboard() {
-  const supabase = getSupabaseBrowserClient()
-  const monitor = EdgeFunctionMonitor.getInstance()
-
-  const [metrics, setMetrics] = useState<MetricData[]>([])
-  const [healthChecks, setHealthChecks] = useState<HealthCheck[]>([])
+export function MonitoringDashboard() {
+  const [metrics, setMetrics] = useState<Record<string, MetricsSummary>>({})
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null)
+  const [recentErrors, setRecentErrors] = useState<ErrorLog[]>([])
+  const [timeRange, setTimeRange] = useState<"hour" | "day" | "week">("hour")
   const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
 
-  useEffect(() => {
-    loadDashboardData()
+  const edgeFunctions = ["auth", "media", "chat", "ai"]
 
-    // Refresh every 30 seconds
-    const interval = setInterval(loadDashboardData, 30000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const loadDashboardData = async () => {
+  const fetchData = async () => {
     try {
-      // Load Edge Function performance metrics
-      const { data: metricsData, error: metricsError } = await supabase
-        .from("edge_function_performance")
-        .select("*")
-        .order("hour", { ascending: false })
-        .limit(20)
+      setLoading(true)
 
-      if (metricsError) throw metricsError
-      setMetrics(metricsData || [])
+      // Fetch metrics for each Edge Function
+      const metricsPromises = edgeFunctions.map(async (func) => {
+        const data = await monitoring.getMetrics(func, timeRange)
+        return [func, data] as [string, MetricsSummary]
+      })
 
-      // Load system health checks
-      const { data: healthData, error: healthError } = await supabase
-        .from("system_health_summary")
-        .select("*")
-        .order("service_name")
+      const metricsResults = await Promise.all(metricsPromises)
+      const metricsMap = Object.fromEntries(metricsResults)
 
-      if (healthError) throw healthError
-      setHealthChecks(healthData || [])
+      // Fetch overall metrics
+      const overallMetrics = await monitoring.getMetrics(undefined, timeRange)
+      metricsMap["overall"] = overallMetrics
 
-      setLastRefresh(new Date())
+      setMetrics(metricsMap)
+
+      // Fetch system health
+      const health = await monitoring.getSystemHealth()
+      setSystemHealth(health)
+
+      // Fetch recent errors
+      const errors = await monitoring.getRecentErrors(20)
+      setRecentErrors(errors)
+
+      setLastUpdated(new Date())
     } catch (error) {
-      console.error("Failed to load dashboard data:", error)
+      console.error("Failed to fetch monitoring data:", error)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    fetchData()
+
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000)
+    return () => clearInterval(interval)
+  }, [timeRange])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -96,25 +114,40 @@ export default function MonitoringDashboard() {
       case "degraded":
         return <AlertTriangle className="h-4 w-4 text-yellow-600" />
       case "down":
-        return <AlertTriangle className="h-4 w-4 text-red-600" />
+        return <XCircle className="h-4 w-4 text-red-600" />
       default:
-        return <Activity className="h-4 w-4 text-gray-600" />
+        return <Clock className="h-4 w-4 text-gray-600" />
     }
   }
 
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${Math.round(ms)}ms`
+  const getFunctionIcon = (functionName: string) => {
+    switch (functionName) {
+      case "auth":
+        return <Zap className="h-4 w-4" />
+      case "media":
+        return <Database className="h-4 w-4" />
+      case "chat":
+        return <MessageSquare className="h-4 w-4" />
+      case "ai":
+        return <Brain className="h-4 w-4" />
+      default:
+        return <Activity className="h-4 w-4" />
+    }
+  }
+
+  const formatTime = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`
     return `${(ms / 1000).toFixed(2)}s`
   }
 
-  const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString()
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString()
   }
 
-  if (loading) {
+  if (loading && Object.keys(metrics).length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <RefreshCw className="h-8 w-8 animate-spin" />
       </div>
     )
   }
@@ -125,213 +158,186 @@ export default function MonitoringDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">System Monitoring</h1>
-          <p className="text-muted-foreground">Last updated: {formatTimestamp(lastRefresh.toISOString())}</p>
+          <p className="text-muted-foreground">Real-time performance metrics and system health</p>
         </div>
-        <Button onClick={loadDashboardData} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-muted-foreground">Last updated: {lastUpdated.toLocaleTimeString()}</div>
+          <Button onClick={fetchData} disabled={loading} size="sm">
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      {/* Time Range Selector */}
+      <Tabs value={timeRange} onValueChange={(value) => setTimeRange(value as any)}>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="functions">Edge Functions</TabsTrigger>
-          <TabsTrigger value="health">Health Checks</TabsTrigger>
-          <TabsTrigger value="errors">Error Logs</TabsTrigger>
+          <TabsTrigger value="hour">Last Hour</TabsTrigger>
+          <TabsTrigger value="day">Last 24 Hours</TabsTrigger>
+          <TabsTrigger value="week">Last Week</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-4">
-          {/* System Status Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <TabsContent value={timeRange} className="space-y-6">
+          {/* System Health Overview */}
+          {systemHealth && (
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
-                <Activity className="h-4 w-4 text-muted-foreground" />
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  {getStatusIcon(systemHealth.overallStatus)}
+                  System Health
+                </CardTitle>
+                <CardDescription>Overall system status and service health</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {metrics.reduce((sum, m) => sum + m.total_calls, 0).toLocaleString()}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {systemHealth.services.map((service) => (
+                    <div key={service.name} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex items-center gap-2">
+                        {getFunctionIcon(service.name)}
+                        <span className="font-medium capitalize">{service.name}</span>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant={service.status === "healthy" ? "default" : "destructive"}>
+                          {service.status}
+                        </Badge>
+                        <div className="text-xs text-muted-foreground mt-1">{formatTime(service.responseTime)}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-xs text-muted-foreground">Last 24 hours</p>
               </CardContent>
             </Card>
+          )}
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {metrics.length > 0
-                    ? formatDuration(metrics.reduce((sum, m) => sum + m.avg_duration, 0) / metrics.length)
-                    : "0ms"}
-                </div>
-                <p className="text-xs text-muted-foreground">Across all functions</p>
-              </CardContent>
-            </Card>
+          {/* Overall Metrics */}
+          {metrics.overall && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{metrics.overall.totalRequests.toLocaleString()}</div>
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {metrics.length > 0
-                    ? `${(metrics.reduce((sum, m) => sum + m.success_rate, 0) / metrics.length).toFixed(1)}%`
-                    : "100%"}
-                </div>
-                <p className="text-xs text-muted-foreground">Last 24 hours</p>
-              </CardContent>
-            </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+                  <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{metrics.overall.successRate.toFixed(1)}%</div>
+                  <Progress value={metrics.overall.successRate} className="mt-2" />
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Error Count</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {metrics.reduce((sum, m) => sum + m.error_count, 0)}
-                </div>
-                <p className="text-xs text-muted-foreground">Last 24 hours</p>
-              </CardContent>
-            </Card>
-          </div>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatTime(metrics.overall.avgResponseTime)}</div>
+                </CardContent>
+              </Card>
 
-          {/* Service Health Overview */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Error Count</CardTitle>
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-red-600">{metrics.overall.errorCount}</div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Edge Function Performance */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Edge Function Performance</CardTitle>
+              <CardDescription>Performance breakdown by Edge Function</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {edgeFunctions.map((func) => {
+                  const metric = metrics[func]
+                  if (!metric) return null
+
+                  return (
+                    <div key={func} className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        {getFunctionIcon(func)}
+                        <h3 className="font-semibold capitalize">{func} Function</h3>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-muted-foreground">Requests</div>
+                          <div className="font-medium">{metric.totalRequests}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Success Rate</div>
+                          <div className="font-medium">{metric.successRate.toFixed(1)}%</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Avg Time</div>
+                          <div className="font-medium">{formatTime(metric.avgResponseTime)}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">P95 Time</div>
+                          <div className="font-medium">{formatTime(metric.p95ResponseTime)}</div>
+                        </div>
+                      </div>
+
+                      <Progress value={metric.successRate} className="h-2" />
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Recent Errors */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Server className="h-5 w-5" />
-                Service Health
+                <AlertTriangle className="h-5 w-5" />
+                Recent Errors
               </CardTitle>
+              <CardDescription>Latest error logs from Edge Functions</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {healthChecks.map((health) => (
-                  <div key={health.service_name} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(health.status)}
-                      <span className="font-medium">{health.service_name}</span>
-                    </div>
-                    <Badge variant={health.status === "healthy" ? "default" : "destructive"}>{health.status}</Badge>
+              <ScrollArea className="h-64">
+                {recentErrors.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">No recent errors found</div>
+                ) : (
+                  <div className="space-y-3">
+                    {recentErrors.map((error) => (
+                      <div key={error.id} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getFunctionIcon(error.function_name)}
+                            <span className="font-medium">{error.function_name}</span>
+                            <Badge variant="outline">{error.action}</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">{formatDate(error.created_at!)}</div>
+                        </div>
+                        <div className="text-sm text-red-600">{error.error_message}</div>
+                        {error.stack_trace && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-muted-foreground">Stack trace</summary>
+                            <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">{error.stack_trace}</pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="functions" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5" />
-                Edge Function Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {metrics.map((metric, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{metric.function_name}</Badge>
-                        <span className="text-sm text-muted-foreground">{metric.action}</span>
-                      </div>
-                      <Badge variant={metric.success_rate > 95 ? "default" : "destructive"}>
-                        {metric.success_rate.toFixed(1)}% success
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Total Calls:</span>
-                        <div className="font-medium">{metric.total_calls.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Avg Duration:</span>
-                        <div className="font-medium">{formatDuration(metric.avg_duration)}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">P95 Duration:</span>
-                        <div className="font-medium">{formatDuration(metric.p95_duration)}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Errors:</span>
-                        <div className="font-medium text-red-600">{metric.error_count}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2">
-                      <Progress value={metric.success_rate} className="h-2" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="health" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>System Health Checks</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {healthChecks.map((health) => (
-                  <div key={health.service_name} className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(health.status)}
-                        <span className="font-medium">{health.service_name}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={health.status === "healthy" ? "default" : "destructive"}>{health.status}</Badge>
-                        <span className="text-sm text-muted-foreground">{formatTimestamp(health.last_check)}</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Response Time:</span>
-                        <div className="font-medium">{formatDuration(health.avg_response_time)}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Healthy:</span>
-                        <div className="font-medium text-green-600">{health.healthy_count}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Degraded:</span>
-                        <div className="font-medium text-yellow-600">{health.degraded_count}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Down:</span>
-                        <div className="font-medium text-red-600">{health.down_count}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="errors" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Error Logs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <AlertTriangle className="h-8 w-8 mx-auto mb-2" />
-                <p>Error log component will be implemented here</p>
-                <p className="text-sm">This will show recent errors from Edge Functions</p>
-              </div>
+                )}
+              </ScrollArea>
             </CardContent>
           </Card>
         </TabsContent>
