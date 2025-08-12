@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { corsHeaders } from "../_shared/cors.ts"
-import { Deno } from "https://deno.land/std@0.168.0/runtime.ts" // Declare Deno variable
+import { Deno } from "https://deno.land/std@0.168.0/node/global.ts"
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -12,51 +13,57 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    const authHeader = req.headers.get("Authorization")!
-    const token = authHeader.replace("Bearer ", "")
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    )
+
+    const authHeader = req.headers.get("Authorization")
+    if (!authHeader) throw new Error("No authorization header")
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser(token)
+    } = await supabaseClient.auth.getUser(authHeader.replace("Bearer ", ""))
+
     if (authError || !user) throw new Error("Unauthorized")
 
-    const { action, ...body } = await req.json()
+    const {
+      action,
+      fileName,
+      fileType,
+      folder,
+      filePath,
+      expiresIn,
+      petId,
+      mediaType,
+      description,
+      storagePath,
+      publicUrl,
+    } = await req.json()
 
     switch (action) {
       case "generate-upload-url": {
-        const { fileName, fileType, bucket = "media", folder } = body
+        const path = folder ? `${folder}/${fileName}` : fileName
 
-        if (!fileName || !fileType) {
-          throw new Error("fileName and fileType are required")
-        }
-
-        // Generate unique filename
-        const fileExt = fileName.split(".").pop()
-        const uniqueFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`
-        const filePath = folder ? `${folder}/${uniqueFileName}` : uniqueFileName
-
-        const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(filePath)
+        const { data, error } = await supabaseClient.storage.from("media").createSignedUploadUrl(path)
 
         if (error) throw error
 
         return new Response(
           JSON.stringify({
             uploadUrl: data.signedUrl,
-            path: filePath,
+            path: path,
             token: data.token,
           }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
         )
       }
 
       case "create-signed-url": {
-        const { path, bucket = "media", expiresIn = 3600 } = body
-
-        if (!path) throw new Error("path is required")
-
-        const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
+        const { data, error } = await supabaseClient.storage.from("media").createSignedUrl(filePath, expiresIn || 3600)
 
         if (error) throw error
 
@@ -65,20 +72,27 @@ serve(async (req) => {
         })
       }
 
-      case "save-media-record": {
-        const { petId, type, filename, path, mimeType, size, metadata } = body
+      case "delete-file": {
+        const { error } = await supabaseClient.storage.from("media").remove([filePath])
 
-        const { data, error } = await supabase
+        if (error) throw error
+
+        return new Response(JSON.stringify({ message: "File deleted successfully" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+
+      case "save-media-record": {
+        const { data, error } = await supabaseClient
           .from("pet_media")
           .insert({
             pet_id: petId,
-            uploader_id: user.id,
-            type,
-            filename,
-            path,
-            mime_type: mimeType,
-            size,
-            metadata: metadata || {},
+            user_id: user.id,
+            media_type: mediaType,
+            description: description,
+            storage_path: storagePath,
+            public_url: publicUrl,
+            created_at: new Date().toISOString(),
           })
           .select()
           .single()
@@ -86,30 +100,6 @@ serve(async (req) => {
         if (error) throw error
 
         return new Response(JSON.stringify({ media: data }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
-
-      case "delete-media": {
-        const { mediaId, path, bucket = "media" } = body
-
-        // Delete from database
-        const { error: dbError } = await supabase
-          .from("pet_media")
-          .delete()
-          .eq("id", mediaId)
-          .eq("uploader_id", user.id)
-
-        if (dbError) throw dbError
-
-        // Delete from storage
-        const { error: storageError } = await supabase.storage.from(bucket).remove([path])
-
-        if (storageError) {
-          console.warn("Storage deletion failed:", storageError)
-        }
-
-        return new Response(JSON.stringify({ message: "Media deleted successfully" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         })
       }

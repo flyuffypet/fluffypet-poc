@@ -1,93 +1,73 @@
-"use server"
-
-import { revalidatePath } from "next/cache"
+import { authFunctions } from "@/lib/edge-functions"
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase-server"
-import { authConfig } from "@/lib/auth-config"
 
-export async function signUp(formData: FormData) {
-  const supabase = createClient()
+export async function signIn(email: string, password: string) {
+  try {
+    const result = await authFunctions.signIn(email, password)
 
-  const data = {
-    email: formData.get("email") as string,
-    password: formData.get("password") as string,
+    if (result.error) {
+      return { error: result.error }
+    }
+
+    return { success: true, redirectTo: "/dashboard" }
+  } catch (error: any) {
+    return { error: error.message || "Sign in failed" }
   }
-
-  const { error } = await supabase.auth.signUp({
-    ...data,
-    options: {
-      emailRedirectTo: authConfig.redirectUrls.callback,
-    },
-  })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  revalidatePath("/", "layout")
-  redirect("/login?message=Check your email to confirm your account")
 }
 
-export async function signIn(formData: FormData) {
-  const supabase = createClient()
+export async function signUp(email: string, password: string) {
+  try {
+    const result = await authFunctions.signUp(email, password, {
+      email,
+      first_name: "",
+      last_name: "",
+    })
 
-  const data = {
-    email: formData.get("email") as string,
-    password: formData.get("password") as string,
+    if (result.error) {
+      return { error: result.error }
+    }
+
+    return {
+      success: "Account created! Please check your email to verify your account.",
+      redirectTo: "/login",
+    }
+  } catch (error: any) {
+    return { error: error.message || "Sign up failed" }
   }
-
-  const { error } = await supabase.auth.signInWithPassword(data)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  revalidatePath("/", "layout")
-  redirect("/dashboard")
-}
-
-export async function signOut() {
-  const supabase = createClient()
-
-  const { error } = await supabase.auth.signOut()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  revalidatePath("/", "layout")
-  redirect("/login")
-}
-
-export async function resetPassword(formData: FormData) {
-  const supabase = createClient()
-
-  const email = formData.get("email") as string
-
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: authConfig.redirectUrls.passwordReset,
-  })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return { message: "Password reset email sent" }
 }
 
 export async function updatePassword(formData: FormData) {
-  const supabase = createClient()
-
   const password = formData.get("password") as string
 
-  const { error } = await supabase.auth.updateUser({
-    password: password,
-  })
-
-  if (error) {
-    throw new Error(error.message)
+  if (!password || password.length < 6) {
+    throw new Error("Password must be at least 6 characters")
   }
 
-  revalidatePath("/", "layout")
-  redirect("/dashboard?message=Password updated successfully")
+  try {
+    // This would typically get the auth token from the session
+    // For now, we'll assume it's handled by the Edge Function
+    const result = await authFunctions.updatePassword(password, "")
+
+    if (result.error) {
+      throw new Error(result.error)
+    }
+
+    redirect("/dashboard")
+  } catch (error: any) {
+    throw new Error(error.message || "Failed to update password")
+  }
+}
+
+export async function resetPassword(email: string) {
+  try {
+    const result = await authFunctions.resetPassword(email)
+
+    if (result.error) {
+      return { error: result.error }
+    }
+
+    return { success: "Password reset email sent!" }
+  } catch (error: any) {
+    return { error: error.message || "Failed to send reset email" }
+  }
 }

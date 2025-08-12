@@ -1,13 +1,12 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { updatePassword } from "@/lib/actions/auth-actions"
+import { authFunctions, getCurrentUserToken } from "@/lib/edge-functions"
 import { useToast } from "@/hooks/use-toast"
 
 export function ResetPasswordForm() {
@@ -42,10 +41,12 @@ export function ResetPasswordForm() {
     setIsLoading(true)
 
     try {
-      const formData = new FormData()
-      formData.append("password", password)
+      const authToken = await getCurrentUserToken()
+      if (!authToken) {
+        throw new Error("Authentication required")
+      }
 
-      await updatePassword(formData)
+      await authFunctions.updatePassword(password, authToken)
 
       toast({
         title: "Success",

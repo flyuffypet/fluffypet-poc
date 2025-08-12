@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
-import { edgeFunctions } from "@/lib/edge-functions"
+import { mediaFunctions, getCurrentUserToken } from "@/lib/edge-functions"
+import { getSupabaseBrowserClient } from "@/lib/supabase-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
@@ -22,6 +22,7 @@ export default function MediaUploader({
   accept = "image/*,application/pdf",
   multiple = true,
 }: MediaUploaderProps) {
+  const supabase = getSupabaseBrowserClient()
   const [files, setFiles] = useState<FileList | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -46,16 +47,21 @@ export default function MediaUploader({
     setStatus("Uploading files...")
 
     try {
+      const authToken = await getCurrentUserToken()
+      if (!authToken) {
+        throw new Error("Authentication required")
+      }
+
       const totalFiles = files.length
       let completedFiles = 0
 
       for (const file of Array.from(files)) {
-        // Generate upload URL
-        const { uploadUrl, path } = await edgeFunctions.generateUploadUrl(
+        // Generate upload URL via Edge Function
+        const { uploadUrl, filePath } = await mediaFunctions.generateUploadUrl(
           file.name,
           file.type,
-          "media",
           `pet-media/${petId}`,
+          authToken,
         )
 
         // Upload file to Supabase Storage
@@ -71,7 +77,7 @@ export default function MediaUploader({
           throw new Error(`Upload failed for ${file.name}`)
         }
 
-        // Save media record
+        // Determine media type
         const mediaType = file.type.startsWith("image/")
           ? "image"
           : file.type.startsWith("video/")
@@ -80,10 +86,18 @@ export default function MediaUploader({
               ? "document"
               : "other"
 
-        const { media } = await edgeFunctions.saveMediaRecord(petId, mediaType, file.name, path, file.type, file.size, {
-          originalName: file.name,
-          uploadedAt: new Date().toISOString(),
-        })
+        // Get public URL for the uploaded file
+        const { data: publicUrlData } = supabase.storage.from("media").getPublicUrl(filePath)
+
+        // Save media record via Edge Function
+        const { media } = await mediaFunctions.saveMediaRecord(
+          petId,
+          mediaType,
+          file.name,
+          filePath,
+          publicUrlData.publicUrl,
+          authToken,
+        )
 
         completedFiles++
         setProgress((completedFiles / totalFiles) * 100)

@@ -1,10 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { corsHeaders } from "../_shared/cors.ts"
-import { Deno } from "https://deno.land/std@0.168.0/node/deno.ts"
+import { env } from "https://deno.land/std@0.168.0/dotenv/mod.ts"
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+await env.load()
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -12,46 +15,46 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    const authHeader = req.headers.get("Authorization")!
-    const token = authHeader.replace("Bearer ", "")
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    )
+
+    const authHeader = req.headers.get("Authorization")
+    if (!authHeader) throw new Error("No authorization header")
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser(token)
+    } = await supabaseClient.auth.getUser(authHeader.replace("Bearer ", ""))
+
     if (authError || !user) throw new Error("Unauthorized")
 
-    const { action, ...body } = await req.json()
+    const { action, recipientId, conversationId, message, messageType } = await req.json()
 
     switch (action) {
       case "create-conversation": {
-        const { participantId, type = "direct", contextId } = body
-
         // Check if conversation already exists
-        const { data: existing } = await supabase
+        const { data: existingConversation } = await supabaseClient
           .from("conversations")
-          .select("id")
+          .select("*")
           .or(
-            `and(user1_id.eq.${user.id},user2_id.eq.${participantId}),and(user1_id.eq.${participantId},user2_id.eq.${user.id})`,
+            `and(user1_id.eq.${user.id},user2_id.eq.${recipientId}),and(user1_id.eq.${recipientId},user2_id.eq.${user.id})`,
           )
-          .eq("type", type)
-          .maybeSingle()
+          .single()
 
-        if (existing) {
-          return new Response(JSON.stringify({ conversationId: existing.id }), {
+        if (existingConversation) {
+          return new Response(JSON.stringify({ conversation: existingConversation }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           })
         }
 
         // Create new conversation
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from("conversations")
           .insert({
             user1_id: user.id,
-            user2_id: participantId,
-            type,
-            context_id: contextId,
+            user2_id: recipientId,
             created_at: new Date().toISOString(),
           })
           .select()
@@ -59,57 +62,39 @@ serve(async (req) => {
 
         if (error) throw error
 
-        return new Response(JSON.stringify({ conversationId: data.id }), {
+        return new Response(JSON.stringify({ conversation: data }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         })
       }
 
       case "send-message": {
-        const { conversationId, content, messageType = "text" } = body
-
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from("messages")
           .insert({
             conversation_id: conversationId,
             sender_id: user.id,
-            content,
-            message_type: messageType,
-            sent_at: new Date().toISOString(),
+            content: message,
+            message_type: messageType || "text",
+            created_at: new Date().toISOString(),
           })
           .select()
           .single()
 
         if (error) throw error
 
+        // Update conversation last_message_at
+        await supabaseClient
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", conversationId)
+
         return new Response(JSON.stringify({ message: data }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         })
       }
 
-      case "get-messages": {
-        const { conversationId, limit = 50, offset = 0 } = body
-
-        const { data, error } = await supabase
-          .from("messages")
-          .select(`
-            *,
-            sender:users!sender_id(id, full_name, avatar_url)
-          `)
-          .eq("conversation_id", conversationId)
-          .order("sent_at", { ascending: false })
-          .range(offset, offset + limit - 1)
-
-        if (error) throw error
-
-        return new Response(JSON.stringify({ messages: data.reverse() }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
-
-      case "mark-as-read": {
-        const { conversationId } = body
-
-        const { error } = await supabase
+      case "mark-read": {
+        const { error } = await supabaseClient
           .from("messages")
           .update({ read_at: new Date().toISOString() })
           .eq("conversation_id", conversationId)
@@ -124,19 +109,16 @@ serve(async (req) => {
       }
 
       case "get-conversations": {
-        const { limit = 20, offset = 0 } = body
-
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from("conversations")
           .select(`
             *,
-            user1:users!user1_id(id, full_name, avatar_url),
-            user2:users!user2_id(id, full_name, avatar_url),
-            last_message:messages(content, sent_at, sender_id)
+            user1:users!conversations_user1_id_fkey(id, full_name, avatar_url),
+            user2:users!conversations_user2_id_fkey(id, full_name, avatar_url),
+            last_message:messages(content, created_at, sender_id)
           `)
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
-          .order("updated_at", { ascending: false })
-          .range(offset, offset + limit - 1)
+          .order("last_message_at", { ascending: false })
 
         if (error) throw error
 

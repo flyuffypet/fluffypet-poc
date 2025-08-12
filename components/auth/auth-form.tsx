@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import SocialAuthButtons from "./social-auth-buttons"
 import { track } from "@vercel/analytics"
-import { signIn, signUp } from "@/lib/actions/auth-actions"
+import { authFunctions } from "@/lib/edge-functions"
 
 type Mode = "signin" | "signup"
 
@@ -39,22 +39,31 @@ export default function AuthForm({ mode = "signin" as Mode }: { mode?: Mode }) {
     }
 
     try {
-      const result = mode === "signin" ? await signIn(email, password) : await signUp(email, password)
+      if (mode === "signin") {
+        const result = await authFunctions.signIn(email, password)
 
-      if (result?.error) {
-        setError(result.error)
-      } else if (result?.success) {
-        if (typeof result.success === "string") {
-          setSuccess(result.success)
+        if (result.error) {
+          setError(result.error)
+        } else {
+          setSuccess("Signed in successfully!")
+          router.push(next)
         }
+      } else {
+        const result = await authFunctions.signUp(email, password, {
+          email,
+          first_name: "",
+          last_name: "",
+        })
 
-        if (result.redirectTo) {
-          router.push(result.redirectTo)
+        if (result.error) {
+          setError(result.error)
+        } else {
+          setSuccess("Account created! Please check your email to verify your account.")
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Auth error:", err)
-      setError("An unexpected error occurred. Please try again.")
+      setError(err.message || "An unexpected error occurred. Please try again.")
     } finally {
       setLoading(false)
     }

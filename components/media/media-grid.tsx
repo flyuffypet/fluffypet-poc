@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Image from "next/image"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"
-import { edgeFunctions } from "@/lib/edge-functions"
+import { mediaFunctions, getCurrentUserToken } from "@/lib/edge-functions"
 import { Button } from "@/components/ui/button"
 import { Download, Eye, Trash2 } from "lucide-react"
 
@@ -46,11 +46,13 @@ export default function MediaGrid({ petId, onMediaDeleted }: MediaGridProps) {
 
       setItems(data || [])
 
-      // Generate signed URLs for all media
+      // Generate signed URLs for all media via Edge Functions
+      const authToken = await getCurrentUserToken()
       const urls: Record<string, string> = {}
+
       for (const item of data || []) {
         try {
-          const { signedUrl } = await edgeFunctions.createSignedUrl(item.path, "media", 3600)
+          const { signedUrl } = await mediaFunctions.createSignedUrl(item.path, 3600, authToken)
           urls[item.id] = signedUrl
         } catch (error) {
           console.warn(`Failed to generate signed URL for ${item.path}:`, error)
@@ -66,7 +68,17 @@ export default function MediaGrid({ petId, onMediaDeleted }: MediaGridProps) {
 
   const deleteMedia = async (mediaId: string, path: string) => {
     try {
-      await edgeFunctions.deleteMedia(mediaId, path, "media")
+      const authToken = await getCurrentUserToken()
+      if (!authToken) {
+        throw new Error("Authentication required")
+      }
+
+      // Delete file via Edge Function
+      await mediaFunctions.deleteFile(path, authToken)
+
+      // Delete database record
+      const { error } = await supabase.from("pet_media").delete().eq("id", mediaId)
+      if (error) throw error
 
       // Update local state
       setItems((prev) => prev.filter((item) => item.id !== mediaId))

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, ImageIcon, Paperclip } from "lucide-react"
 import { useRealtimeChat, type ChatMessage } from "@/hooks/use-realtime-chat"
+import { chatFunctions, getCurrentUserToken } from "@/lib/edge-functions"
 import { formatDistanceToNow } from "date-fns"
 
 interface RealtimeChatProps {
@@ -37,16 +38,36 @@ export default function RealtimeChat({
 }: RealtimeChatProps) {
   const [inputValue, setInputValue] = useState("")
   const [isTypingIndicator, setIsTypingIndicator] = useState(false)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(conversationId || null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout>()
 
   const { messages, loading, error, sendMessage, markAsRead, sendTypingIndicator, isTyping } = useRealtimeChat({
-    conversationId,
+    conversationId: activeConversationId || undefined,
     otherUserId,
     currentUserId,
     bookingId,
     appointmentId,
   })
+
+  // Initialize conversation if needed
+  useEffect(() => {
+    const initConversation = async () => {
+      if (!activeConversationId && otherUserId) {
+        try {
+          const authToken = await getCurrentUserToken()
+          if (authToken) {
+            const { conversationId: newConvId } = await chatFunctions.createConversation(otherUserId, authToken)
+            setActiveConversationId(newConvId)
+          }
+        } catch (error) {
+          console.error("Failed to create conversation:", error)
+        }
+      }
+    }
+
+    initConversation()
+  }, [activeConversationId, otherUserId])
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -65,14 +86,21 @@ export default function RealtimeChat({
   }, [messages, currentUserId, markAsRead])
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return
+    if (!inputValue.trim() || !activeConversationId) return
 
-    await sendMessage(inputValue.trim())
-    setInputValue("")
+    try {
+      const authToken = await getCurrentUserToken()
+      if (authToken) {
+        await chatFunctions.sendMessage(activeConversationId, inputValue.trim(), "text", authToken)
+        setInputValue("")
 
-    // Stop typing indicator
-    sendTypingIndicator(false)
-    setIsTypingIndicator(false)
+        // Stop typing indicator
+        sendTypingIndicator(false)
+        setIsTypingIndicator(false)
+      }
+    } catch (error) {
+      console.error("Failed to send message:", error)
+    }
   }
 
   const handleInputChange = (value: string) => {

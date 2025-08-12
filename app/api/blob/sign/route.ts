@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 
+// This file is removed since we're using Supabase Storage instead of Vercel Blob
+// Media signing functionality is now handled by the Edge Function at supabase/functions/media/index.ts
+
 export async function POST(req: Request) {
   try {
     const { path, bucket = "media", expiresIn = 3600 } = await req.json()

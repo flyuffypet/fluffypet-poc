@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { corsHeaders } from "../_shared/cors.ts"
-import { Deno } from "https://deno.land/std@0.168.0/runtime.ts" // Declare Deno variable
+import { Deno } from "https://deno.land/std@0.168.0/node/global.ts" // Declare Deno variable
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -12,42 +13,44 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    const { action, ...body } = await req.json()
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    )
+
+    const { action, email, password, userData, newPassword } = await req.json()
 
     switch (action) {
       case "signup": {
-        const { email, password, userData } = body
-
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        const { data, error } = await supabaseClient.auth.admin.createUser({
           email,
           password,
           email_confirm: true,
-          user_metadata: userData,
+          user_metadata: userData || {},
         })
 
-        if (authError) throw authError
+        if (error) throw error
 
         // Create user profile
-        const { error: profileError } = await supabase.from("users").insert({
-          id: authData.user.id,
-          email: authData.user.email,
-          full_name: userData.full_name,
-          role: userData.role || "owner",
+        const { error: profileError } = await supabaseClient.from("users").insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: userData?.full_name || "",
+          role: userData?.role || "owner",
           created_at: new Date().toISOString(),
         })
 
-        if (profileError) throw profileError
+        if (profileError) {
+          console.error("Profile creation error:", profileError)
+        }
 
-        return new Response(JSON.stringify({ user: authData.user }), {
+        return new Response(JSON.stringify({ user: data.user }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         })
       }
 
       case "signin": {
-        const { email, password } = body
-
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
           email,
           password,
         })
@@ -60,9 +63,7 @@ serve(async (req) => {
       }
 
       case "reset-password": {
-        const { email } = body
-
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
           redirectTo: `${Deno.env.get("SITE_URL")}/reset-password`,
         })
 
@@ -74,9 +75,19 @@ serve(async (req) => {
       }
 
       case "update-password": {
-        const { password, accessToken } = body
+        const authHeader = req.headers.get("Authorization")
+        if (!authHeader) throw new Error("No authorization header")
 
-        const { error } = await supabase.auth.admin.updateUserById(accessToken, { password })
+        const {
+          data: { user },
+          error: authError,
+        } = await supabaseClient.auth.getUser(authHeader.replace("Bearer ", ""))
+
+        if (authError || !user) throw new Error("Unauthorized")
+
+        const { error } = await supabaseClient.auth.admin.updateUserById(user.id, {
+          password: newPassword,
+        })
 
         if (error) throw error
 
