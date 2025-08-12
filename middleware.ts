@@ -80,9 +80,82 @@ export async function middleware(request: NextRequest) {
   const pathname = url.pathname
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/", "/login", "/signup", "/auth/callback", "/api", "/_next", "/favicon.ico"]
+  const publicRoutes = [
+    "/",
+    "/login",
+    "/signup",
+    "/auth/callback",
+    "/api",
+    "/_next",
+    "/favicon.ico",
+    // Marketing & Company pages
+    "/how-it-works",
+    "/features",
+    "/about",
+    "/contact",
+    "/careers",
+    "/pricing",
+    "/partners",
+    "/press",
+    "/blog",
+    "/our-story",
+    // Discovery & Directory pages
+    "/discover",
+    "/vets",
+    "/providers",
+    "/ngos",
+    "/events",
+    // Community pages (read-only public access)
+    "/community",
+    // Lost & Found pages
+    "/lost-found",
+    // Adoption & Rescue pages
+    "/adopt",
+    "/rescues",
+    // E-commerce pages
+    "/shop",
+    // Help & Legal pages
+    "/help",
+    "/status",
+    "/privacy",
+    "/terms",
+    "/cookies",
+    "/gdpr",
+    "/security",
+    "/aup",
+    // SEO & Utility pages
+    "/in",
+    "/breeds",
+    "/download",
+    "/p",
+    // Organization profiles
+    "/org",
+    "/seller",
+    // SOS emergency page
+    "/sos",
+  ]
 
-  const isPublicRoute = publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))
+  const isPublicRoute = publicRoutes.some((route) => {
+    if (route === pathname) return true
+    if (pathname.startsWith(route + "/")) return true
+    // Handle dynamic routes
+    if (route === "/vets" && pathname.match(/^\/vets\/[^/]+$/)) return true
+    if (route === "/providers" && pathname.match(/^\/providers\/[^/]+$/)) return true
+    if (route === "/ngos" && pathname.match(/^\/ngos\/[^/]+$/)) return true
+    if (route === "/events" && pathname.match(/^\/events\/[^/]+$/)) return true
+    if (route === "/community" && pathname.match(/^\/community\/(tags|post)\/[^/]+$/)) return true
+    if (route === "/lost-found" && pathname.match(/^\/lost-found\/[^/]+$/)) return true
+    if (route === "/adopt" && pathname.match(/^\/adopt\/[^/]+$/)) return true
+    if (route === "/shop" && pathname.match(/^\/shop\/(c|p|s)\/[^/]+$/)) return true
+    if (route === "/help" && pathname.match(/^\/help\/[^/]+$/)) return true
+    if (route === "/blog" && pathname.match(/^\/blog\/[^/]+$/)) return true
+    if (route === "/in" && pathname.match(/^\/in\/[^/]+\/(vets|groomers)$/)) return true
+    if (route === "/breeds" && pathname.match(/^\/breeds\/[^/]+$/)) return true
+    if (route === "/p" && pathname.match(/^\/p\/[^/]+$/)) return true
+    if (route === "/org" && pathname.match(/^\/org\/[^/]+$/)) return true
+    if (route === "/seller" && pathname.match(/^\/seller\/[^/]+$/)) return true
+    return false
+  })
 
   const redirectCount = Number.parseInt(request.headers.get("x-redirect-count") || "0")
   const lastRedirectPath = request.headers.get("x-last-redirect-path")
