@@ -54,6 +54,8 @@ export async function middleware(request: NextRequest) {
     },
   )
 
+  await supabase.auth.getSession()
+
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -150,6 +152,12 @@ export async function middleware(request: NextRequest) {
 
     if (profile) {
       const role = profile.role || profile.platform_role
+
+      // If no role is set, redirect to onboarding
+      if (!role) {
+        return NextResponse.redirect(new URL("/onboarding", request.url))
+      }
+
       switch (role) {
         case "service_provider":
           return NextResponse.redirect(new URL("/provider/dashboard", request.url))

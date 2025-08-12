@@ -27,6 +27,15 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get("code")
   const next = searchParams.get("next") || "/dashboard"
+  const error = searchParams.get("error")
+  const errorDescription = searchParams.get("error_description")
+
+  if (error) {
+    console.error("OAuth error:", error, errorDescription)
+    const loginUrl = new URL("/login", request.url)
+    loginUrl.searchParams.set("error", errorDescription || error)
+    return NextResponse.redirect(loginUrl)
+  }
 
   if (!code) {
     return NextResponse.redirect(new URL("/login", request.url))
@@ -35,10 +44,12 @@ export async function GET(request: Request) {
   const supabase = createSupabaseServerClient()
 
   // Exchange the auth code for a session (sets cookies)
-  const { error } = await supabase.auth.exchangeCodeForSession(code)
-  if (error) {
-    console.error("Auth callback error:", error)
-    return NextResponse.redirect(new URL("/login", request.url))
+  const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+  if (exchangeError) {
+    console.error("Auth callback error:", exchangeError)
+    const loginUrl = new URL("/login", request.url)
+    loginUrl.searchParams.set("error", "Authentication failed. Please try again.")
+    return NextResponse.redirect(loginUrl)
   }
 
   // Fetch the signed-in user
@@ -65,7 +76,9 @@ export async function GET(request: Request) {
 
       if (createError) {
         console.error("Profile creation error:", createError)
-        return NextResponse.redirect(new URL("/login?error=profile_creation_failed", request.url))
+        const loginUrl = new URL("/login", request.url)
+        loginUrl.searchParams.set("error", "Failed to create user profile. Please contact support.")
+        return NextResponse.redirect(loginUrl)
       }
 
       // New user without role - redirect to onboarding
