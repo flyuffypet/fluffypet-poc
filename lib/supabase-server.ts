@@ -1,54 +1,20 @@
-import { createServerClient } from "@supabase/ssr"
+import { createServerClient as createSupabaseServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
-import { cache } from "react"
-import { isSupabaseConfigured, getSupabaseConfig } from "./supabase-config"
 
-// Create a cached version of the Supabase client for Server Components
-export const getSupabaseServerClient = cache(() => {
+export function getSupabaseServerClient() {
   const cookieStore = cookies()
 
-  if (!isSupabaseConfigured) {
-    console.warn("Supabase environment variables are not set. Using dummy client.")
-    return {
-      auth: {
-        getUser: () => Promise.resolve({ data: { user: null }, error: null }),
-        getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-      },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            single: () => Promise.resolve({ data: null, error: { code: "PGRST116" } }),
-          }),
-        }),
-        insert: () => Promise.resolve({ error: null }),
-        update: () => ({
-          eq: () => Promise.resolve({ error: null }),
-        }),
-      }),
-    } as any
-  }
-
-  const config = getSupabaseConfig()
-  return createServerClient(config.url, config.anonKey, {
+  return createSupabaseServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
-      getAll() {
-        return cookieStore.getAll()
+      get(name: string) {
+        return cookieStore.get(name)?.value
       },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        } catch {
-          // The `setAll` method was called from a Server Component.
-          // This can be ignored if you have middleware refreshing
-          // user sessions.
-        }
+      set(name: string, value: string, options: any) {
+        cookieStore.set({ name, value, ...options })
+      },
+      remove(name: string, options: any) {
+        cookieStore.delete({ name, ...options })
       },
     },
   })
-})
-
-// Export getSupabaseServerClient as alias for compatibility with existing imports
-export const SupabaseServerClient = getSupabaseServerClient
-
-// Export the original function for compatibility
-export { createServerClient }
+}

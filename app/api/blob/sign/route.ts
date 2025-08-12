@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server"
-import { getSupabaseServerClient } from "@/lib/supabase-server"
-
-// This file is removed since we're using Supabase Storage instead of Vercel Blob
-// Media signing functionality is now handled by the Edge Function at supabase/functions/media/index.ts
+import { createServerClient } from "@/lib/supabase-server"
 
 export async function POST(req: Request) {
   try {
-    const { path, bucket = "media", expiresIn = 3600 } = await req.json()
+    const { path, bucket = "pet-media", expiresIn = 3600 } = await req.json()
 
     if (!path) {
       return NextResponse.json({ error: "path is required" }, { status: 400 })
     }
 
-    const supabase = getSupabaseServerClient()
+    const supabase = createServerClient()
 
     // Check authentication
     const {
@@ -23,7 +20,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Create signed URL for download
+    // Create signed URL for download using Supabase Storage
     const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 
     if (error) {

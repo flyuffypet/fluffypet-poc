@@ -1,5 +1,5 @@
-import { getSupabaseBrowserClient } from "./supabase-client"
-import { getSupabaseServerClient } from "./supabase-server"
+import { createClient } from "@/lib/supabase-client"
+import { createServerClient } from "@/lib/supabase-server"
 
 export interface UploadResult {
   url: string
@@ -19,14 +19,14 @@ export interface MediaFile {
   user_id: string
 }
 
-// Client-side storage utilities
+// Client-side storage utilities using Supabase Storage
 export async function uploadFile(
   file: File,
-  bucket = "media",
+  bucket = "pet-media",
   folder?: string,
   onProgress?: (progress: number) => void,
 ): Promise<UploadResult> {
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   // Generate unique filename
   const fileExt = file.name.split(".").pop()
@@ -49,12 +49,12 @@ export async function uploadFile(
   return {
     url: publicUrl,
     path: data.path,
-    fullPath: data.fullPath,
+    fullPath: data.fullPath || data.path,
   }
 }
 
 export async function getSignedUrl(bucket: string, path: string, expiresIn = 3600): Promise<string> {
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 
@@ -66,7 +66,7 @@ export async function getSignedUrl(bucket: string, path: string, expiresIn = 360
 }
 
 export async function deleteFile(bucket: string, path: string): Promise<void> {
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   const { error } = await supabase.storage.from(bucket).remove([path])
 
@@ -75,9 +75,9 @@ export async function deleteFile(bucket: string, path: string): Promise<void> {
   }
 }
 
-// Server-side storage utilities
-export async function uploadFileServer(file: File, bucket = "media", folder?: string): Promise<UploadResult> {
-  const supabase = getSupabaseServerClient()
+// Server-side storage utilities using Supabase Storage
+export async function uploadFileServer(file: File, bucket = "pet-media", folder?: string): Promise<UploadResult> {
+  const supabase = createServerClient()
 
   const fileExt = file.name.split(".").pop()
   const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
@@ -96,12 +96,12 @@ export async function uploadFileServer(file: File, bucket = "media", folder?: st
   return {
     url: publicUrl,
     path: data.path,
-    fullPath: data.fullPath,
+    fullPath: data.fullPath || data.path,
   }
 }
 
 export async function getSignedUrlServer(bucket: string, path: string, expiresIn = 3600): Promise<string> {
-  const supabase = getSupabaseServerClient()
+  const supabase = createServerClient()
 
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 

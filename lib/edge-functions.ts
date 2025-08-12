@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "@/lib/supabase-client"
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -8,20 +8,6 @@ export interface EdgeFunctionResponse<T = any> {
   data?: T
   error?: string
   timestamp?: string
-}
-
-export interface AuthSignupData {
-  email: string
-  password: string
-  userData: {
-    full_name: string
-    role: string
-  }
-}
-
-export interface AuthSigninData {
-  email: string
-  password: string
 }
 
 export interface MediaUploadData {
@@ -44,7 +30,7 @@ export interface AIAnalysisData {
 }
 
 export class EdgeFunctionsClient {
-  private supabase = createClient(supabaseUrl, supabaseAnonKey)
+  private supabase = createClient()
   private baseUrl: string
 
   constructor() {
@@ -107,36 +93,7 @@ export class EdgeFunctionsClient {
     }
   }
 
-  // Auth Functions
-  async signup(data: AuthSignupData): Promise<EdgeFunctionResponse> {
-    return this.makeRequest("auth", {
-      method: "POST",
-      body: { action: "signup", ...data },
-    })
-  }
-
-  async signin(data: AuthSigninData): Promise<EdgeFunctionResponse> {
-    return this.makeRequest("auth", {
-      method: "POST",
-      body: { action: "signin", ...data },
-    })
-  }
-
-  async resetPassword(email: string): Promise<EdgeFunctionResponse> {
-    return this.makeRequest("auth", {
-      method: "POST",
-      body: { action: "reset-password", email },
-    })
-  }
-
-  async updatePassword(password: string): Promise<EdgeFunctionResponse> {
-    return this.makeRequest("auth", {
-      method: "POST",
-      body: { action: "update-password", password },
-    })
-  }
-
-  // Media Functions
+  // Media Functions using Supabase Storage
   async generateUploadUrl(data: MediaUploadData): Promise<EdgeFunctionResponse> {
     return this.makeRequest("media", {
       method: "POST",
@@ -270,5 +227,60 @@ export class EdgeFunctionsClient {
 // Export singleton instance
 export const edgeFunctions = new EdgeFunctionsClient()
 
+// Helper function to get current user token
+export async function getCurrentUserToken(): Promise<string | null> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  return session?.access_token || null
+}
+
+// Simplified media functions for easier use
+export const mediaFunctions = {
+  async generateUploadUrl(fileName: string, fileType: string, folder?: string, token?: string) {
+    const response = await edgeFunctions.generateUploadUrl({
+      fileName,
+      fileType,
+      petId: folder,
+    })
+    if (!response.success) throw new Error(response.error)
+    return response.data
+  },
+
+  async createSignedUrl(filePath: string, expiresIn = 3600, token?: string) {
+    const response = await edgeFunctions.generateSignedUrl(filePath, expiresIn)
+    if (!response.success) throw new Error(response.error)
+    return response.data
+  },
+
+  async saveMediaRecord(petId: string, type: string, filename: string, path: string, url: string, token?: string) {
+    // This would typically be handled by the media edge function
+    // For now, we'll use direct Supabase client
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("pet_media")
+      .insert({
+        pet_id: petId,
+        type,
+        filename,
+        path,
+        url,
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+    return { media: data }
+  },
+
+  async deleteFile(filePath: string, token?: string) {
+    const response = await edgeFunctions.deleteFile(filePath)
+    if (!response.success) throw new Error(response.error)
+    return response.data
+  },
+}
+
 // Export types
-export type { EdgeFunctionResponse, AuthSignupData, AuthSigninData, MediaUploadData, ChatMessageData, AIAnalysisData }
+export type { EdgeFunctionResponse, MediaUploadData, ChatMessageData, AIAnalysisData }
