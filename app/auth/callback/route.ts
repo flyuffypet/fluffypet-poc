@@ -1,58 +1,64 @@
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
+import { createClient } from "@supabase/supabase-js"
+import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get("code")
+  const next = requestUrl.searchParams.get("next") || "/dashboard"
 
   if (code) {
     const cookieStore = cookies()
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: any) {
+          cookieStore.set({ name, value, ...options })
+        },
+        remove(name: string, options: any) {
+          cookieStore.set({ name, value: "", ...options })
+        },
+      },
+    })
 
     try {
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+      const { error } = await supabase.auth.exchangeCodeForSession(code)
 
       if (error) {
-        console.error("Auth callback error:", error)
-        return NextResponse.redirect(`${requestUrl.origin}/login?error=auth_callback_error`)
+        console.error("Error exchanging code for session:", error)
+        return NextResponse.redirect(`${requestUrl.origin}/login?error=Authentication failed: ${error.message}`)
       }
 
-      if (data.user) {
-        // Check if user profile exists
-        const { data: profile, error: profileError } = await supabase
+      // Check if user needs onboarding
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        // Check if user has completed onboarding
+        const { data: profile } = await supabase
           .from("profiles")
-          .select("*")
-          .eq("id", data.user.id)
+          .select("onboarding_completed")
+          .eq("id", user.id)
           .single()
 
-        if (profileError && profileError.code === "PGRST116") {
-          // Profile doesn't exist, create one
-          const { error: insertError } = await supabase.from("profiles").insert({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || "",
-            avatar_url: data.user.user_metadata?.avatar_url || "",
-            role: "owner",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-
-          if (insertError) {
-            console.error("Profile creation error:", insertError)
-          }
+        if (!profile || !profile.onboarding_completed) {
+          return NextResponse.redirect(`${requestUrl.origin}/onboarding`)
         }
-
-        // Redirect to onboarding for new users or dashboard for existing users
-        const redirectTo = profile ? "/dashboard" : "/onboarding"
-        return NextResponse.redirect(`${requestUrl.origin}${redirectTo}`)
       }
+
+      return NextResponse.redirect(`${requestUrl.origin}${next}`)
     } catch (error) {
-      console.error("Unexpected auth callback error:", error)
-      return NextResponse.redirect(`${requestUrl.origin}/login?error=unexpected_error`)
+      console.error("Unexpected error during auth callback:", error)
+      return NextResponse.redirect(`${requestUrl.origin}/login?error=Unexpected authentication error`)
     }
   }
 
-  // Return the user to the login page if no code is present
-  return NextResponse.redirect(`${requestUrl.origin}/login`)
+  // If no code is present, redirect to login
+  return NextResponse.redirect(`${requestUrl.origin}/login?error=No authentication code provided`)
 }

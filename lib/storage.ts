@@ -1,127 +1,126 @@
-import { createClient } from "@/lib/supabase-client"
+import { getSupabaseClient } from "./supabase-client"
 
-export interface UploadResult {
-  data: {
-    path: string
-    fullPath: string
-    id: string
-  } | null
-  error: Error | null
+// Define storage buckets
+export const STORAGE_BUCKETS = {
+  PET_IMAGES: "pet-images",
+  MEDICAL_RECORDS: "medical-records",
+  USER_AVATARS: "user-avatars",
+  ORGANIZATION_MEDIA: "organization-media",
 }
 
-export interface SignedUrlResult {
-  data: {
-    signedUrl: string
-  } | null
-  error: Error | null
+// Define allowed file types
+export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+export const ALLOWED_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png"]
+
+// Helper function to check file type
+export const isAllowedFileType = (file: File, allowedTypes: string[]): boolean => {
+  return allowedTypes.includes(file.type)
 }
 
-export class StorageService {
-  private supabase = createClient()
+// Helper function to generate a unique file name
+export const generateUniqueFileName = (file: File, prefix = ""): string => {
+  const timestamp = new Date().getTime()
+  const randomString = Math.random().toString(36).substring(2, 10)
+  const extension = file.name.split(".").pop()
+  return `${prefix}${timestamp}-${randomString}.${extension}`
+}
 
-  async uploadFile(
-    bucket: string,
-    path: string,
-    file: File,
-    options?: {
-      cacheControl?: string
-      contentType?: string
-      upsert?: boolean
-    },
-  ): Promise<UploadResult> {
-    try {
-      const { data, error } = await this.supabase.storage.from(bucket).upload(path, file, {
-        cacheControl: options?.cacheControl || "3600",
-        contentType: options?.contentType || file.type,
-        upsert: options?.upsert || false,
-      })
+// Upload a file to Supabase Storage
+export const uploadFile = async (
+  file: File,
+  bucket: string,
+  path = "",
+  onProgress?: (progress: number) => void,
+): Promise<{ path: string; url: string } | null> => {
+  try {
+    const supabase = getSupabaseClient()
+    const fileName = path || generateUniqueFileName(file)
+    const fullPath = path ? `${path}/${fileName}` : fileName
 
-      if (error) {
-        throw error
-      }
+    const { data, error } = await supabase.storage.from(bucket).upload(fullPath, file, {
+      cacheControl: "3600",
+      upsert: false,
+    })
+
+    if (error) {
+      console.error("Error uploading file:", error)
+      return null
+    }
+
+    // Get the public URL
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(data.path)
+
+    return {
+      path: data.path,
+      url: urlData.publicUrl,
+    }
+  } catch (error) {
+    console.error("Unexpected error during file upload:", error)
+    return null
+  }
+}
+
+// Get a signed URL for a file (for private files)
+export const getSignedUrl = async (bucket: string, path: string, expiresIn = 3600): Promise<string | null> => {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
+
+    if (error) {
+      console.error("Error creating signed URL:", error)
+      return null
+    }
+
+    return data.signedUrl
+  } catch (error) {
+    console.error("Unexpected error getting signed URL:", error)
+    return null
+  }
+}
+
+// Delete a file from storage
+export const deleteFile = async (bucket: string, path: string): Promise<boolean> => {
+  try {
+    const supabase = getSupabaseClient()
+    const { error } = await supabase.storage.from(bucket).remove([path])
+
+    if (error) {
+      console.error("Error deleting file:", error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error("Unexpected error deleting file:", error)
+    return false
+  }
+}
+
+// List files in a folder
+export const listFiles = async (bucket: string, path = ""): Promise<{ name: string; url: string }[] | null> => {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase.storage.from(bucket).list(path)
+
+    if (error) {
+      console.error("Error listing files:", error)
+      return null
+    }
+
+    // Filter out folders
+    const files = data.filter((item) => !item.id.endsWith("/"))
+
+    // Get public URLs for each file
+    return files.map((file) => {
+      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(`${path ? `${path}/` : ""}${file.name}`)
 
       return {
-        data: data
-          ? {
-              path: data.path,
-              fullPath: data.fullPath,
-              id: data.id,
-            }
-          : null,
-        error: null,
+        name: file.name,
+        url: urlData.publicUrl,
       }
-    } catch (error) {
-      return {
-        data: null,
-        error: error as Error,
-      }
-    }
+    })
+  } catch (error) {
+    console.error("Unexpected error listing files:", error)
+    return null
   }
-
-  async getSignedUrl(bucket: string, path: string, expiresIn = 3600): Promise<SignedUrlResult> {
-    try {
-      const { data, error } = await this.supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
-
-      if (error) {
-        throw error
-      }
-
-      return {
-        data: data ? { signedUrl: data.signedUrl } : null,
-        error: null,
-      }
-    } catch (error) {
-      return {
-        data: null,
-        error: error as Error,
-      }
-    }
-  }
-
-  async deleteFile(bucket: string, paths: string[]): Promise<{ error: Error | null }> {
-    try {
-      const { error } = await this.supabase.storage.from(bucket).remove(paths)
-
-      return { error }
-    } catch (error) {
-      return { error: error as Error }
-    }
-  }
-
-  async listFiles(bucket: string, path?: string) {
-    try {
-      const { data, error } = await this.supabase.storage.from(bucket).list(path)
-
-      return { data, error }
-    } catch (error) {
-      return { data: null, error: error as Error }
-    }
-  }
-
-  getPublicUrl(bucket: string, path: string) {
-    const { data } = this.supabase.storage.from(bucket).getPublicUrl(path)
-
-    return data.publicUrl
-  }
-}
-
-export const storageService = new StorageService()
-
-// Helper functions for common operations
-export const uploadPetImage = async (petId: string, file: File) => {
-  const path = `pets/${petId}/${Date.now()}-${file.name}`
-  return storageService.uploadFile("pet-media", path, file)
-}
-
-export const uploadMedicalDocument = async (petId: string, file: File) => {
-  const path = `medical/${petId}/${Date.now()}-${file.name}`
-  return storageService.uploadFile("medical-documents", path, file)
-}
-
-export const getPetImageUrl = async (path: string) => {
-  return storageService.getSignedUrl("pet-media", path)
-}
-
-export const getMedicalDocumentUrl = async (path: string) => {
-  return storageService.getSignedUrl("medical-documents", path)
 }
