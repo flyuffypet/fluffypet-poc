@@ -226,14 +226,19 @@ export async function updateUserRole(formData: FormData) {
     switch (role) {
       case "service_provider":
         redirect("/provider/dashboard")
+        break
       case "veterinarian":
         redirect("/vet/dashboard")
+        break
       case "volunteer":
         redirect("/volunteer/dashboard")
+        break
       case "admin":
         redirect("/admin/dashboard")
+        break
       default:
         redirect("/dashboard")
+        break
     }
   } catch (error) {
     console.error("Role update error:", error)
