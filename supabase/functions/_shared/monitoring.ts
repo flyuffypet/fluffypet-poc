@@ -1,120 +1,103 @@
-import { monitoring } from "../../../lib/monitoring.ts"
+import { MonitoringService, withMonitoring, healthCheck } from "../../../lib/monitoring.ts"
+import { Deno } from "https://deno.land/std@0.166.0/node/global.ts"
 
-export async function withMonitoring<T>(
+// Initialize monitoring service for Edge Functions
+const monitoring = new MonitoringService(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!)
+
+// CORS headers for Edge Functions
+export const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+}
+
+// Wrapper for Edge Functions with monitoring
+export async function withEdgeFunctionMonitoring<T>(
   functionName: string,
   action: string,
   handler: () => Promise<T>,
   userId?: string,
-): Promise<T> {
-  const startTime = Date.now()
-  let success = false
-  let error: Error | undefined
-
+): Promise<Response> {
   try {
-    const result = await handler()
-    success = true
-    return result
-  } catch (err) {
-    error = err instanceof Error ? err : new Error(String(err))
-    throw error
-  } finally {
-    const endTime = Date.now()
+    const result = await withMonitoring(functionName, action, handler, userId)
 
-    // Track the function call asynchronously to avoid blocking the response
-    monitoring.trackFunctionCall(functionName, action, startTime, endTime, success, error, userId).catch(console.error)
+    return new Response(JSON.stringify(result), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 200,
+    })
+  } catch (error) {
+    console.error(`Error in ${functionName}:`, error)
+
+    return new Response(
+      JSON.stringify({
+        error: error.message,
+        function: functionName,
+        action,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      },
+    )
   }
 }
 
-export function createMonitoredHandler(functionName: string) {
+// Health check endpoint for Edge Functions
+export async function createHealthCheckEndpoint(serviceName: string) {
   return async (req: Request): Promise<Response> => {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
-    }
-
-    // Handle CORS preflight requests
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 200, headers: corsHeaders })
+      return new Response("ok", { headers: corsHeaders })
     }
 
     try {
-      const { action, ...data } = await req.json()
+      await healthCheck(serviceName, async () => {
+        // Simple health check - verify database connection
+        const { data, error } = await monitoring.supabase.from("profiles").select("count").limit(1)
 
-      if (!action) {
-        return new Response(JSON.stringify({ error: "Action is required" }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        })
-      }
-
-      // Health check endpoint
-      if (action === "health-check") {
-        return new Response(
-          JSON.stringify({
-            status: "healthy",
-            function: functionName,
-            timestamp: new Date().toISOString(),
-          }),
-          {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        )
-      }
-
-      // Extract user ID from authorization header if present
-      const authHeader = req.headers.get("authorization")
-      let userId: string | undefined
-
-      if (authHeader?.startsWith("Bearer ")) {
-        try {
-          const token = authHeader.substring(7)
-          // In a real implementation, you would decode the JWT to get the user ID
-          // For now, we'll leave it undefined unless explicitly provided
-        } catch (err) {
-          console.warn("Failed to decode JWT token:", err)
-        }
-      }
-
-      // This will be overridden by specific function implementations
-      throw new Error(`Handler not implemented for function: ${functionName}`)
-    } catch (error) {
-      console.error(`Error in ${functionName}:`, error)
+        return !error
+      })
 
       return new Response(
         JSON.stringify({
-          error: error instanceof Error ? error.message : "Internal server error",
+          status: "healthy",
+          service: serviceName,
+          timestamp: new Date().toISOString(),
         }),
         {
-          status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      )
+    } catch (error) {
+      return new Response(
+        JSON.stringify({
+          status: "unhealthy",
+          service: serviceName,
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 503,
         },
       )
     }
   }
 }
 
-// Health check utility for system monitoring
-export async function performHealthCheck(serviceName: string, checkFunction: () => Promise<void>): Promise<void> {
-  const startTime = Date.now()
-  let status: "healthy" | "degraded" | "down" = "healthy"
-  let error: string | undefined
-
+// Utility to extract user ID from JWT token
+export function extractUserIdFromRequest(req: Request): string | undefined {
   try {
-    await checkFunction()
-  } catch (err) {
-    status = "down"
-    error = err instanceof Error ? err.message : String(err)
+    const authHeader = req.headers.get("authorization")
+    if (!authHeader) return undefined
+
+    const token = authHeader.replace("Bearer ", "")
+    const payload = JSON.parse(atob(token.split(".")[1]))
+    return payload.sub
+  } catch {
+    return undefined
   }
-
-  const endTime = Date.now()
-  const responseTime = endTime - startTime
-
-  // Determine if service is degraded based on response time
-  if (status === "healthy" && responseTime > 5000) {
-    status = "degraded"
-  }
-
-  await monitoring.recordHealthCheck(serviceName, status, responseTime, error)
 }
+
+// Export monitoring instance for direct use
+export { monitoring }

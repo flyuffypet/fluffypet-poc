@@ -1,15 +1,14 @@
 import { createClient } from "@supabase/supabase-js"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
+// Types for monitoring data
 export interface EdgeFunctionMetric {
   id?: string
   function_name: string
-  action: string
+  action?: string
   response_time_ms: number
   success: boolean
-  error_message?: string
   user_id?: string
+  metadata?: Record<string, any>
   created_at?: string
 }
 
@@ -17,8 +16,7 @@ export interface SystemHealthCheck {
   id?: string
   service_name: string
   status: "healthy" | "degraded" | "down"
-  response_time_ms: number
-  error_message?: string
+  response_time_ms?: number
   metadata?: Record<string, any>
   created_at?: string
 }
@@ -26,7 +24,6 @@ export interface SystemHealthCheck {
 export interface ErrorLog {
   id?: string
   function_name: string
-  action: string
   error_message: string
   stack_trace?: string
   user_id?: string
@@ -34,226 +31,250 @@ export interface ErrorLog {
   created_at?: string
 }
 
+export interface MonitoringSummary {
+  function_name: string
+  total_calls: number
+  successful_calls: number
+  failed_calls: number
+  avg_response_time: number
+  p95_response_time: number
+  p99_response_time: number
+  success_rate_percent: number
+  hour_bucket: string
+}
+
+// Monitoring service class
 export class MonitoringService {
-  async trackFunctionCall(
-    functionName: string,
-    action: string,
-    startTime: number,
-    endTime: number,
-    success: boolean,
-    error?: Error,
-    userId?: string,
-  ): Promise<void> {
-    try {
-      const metric: EdgeFunctionMetric = {
-        function_name: functionName,
-        action,
-        response_time_ms: endTime - startTime,
-        success,
-        error_message: error?.message,
-        user_id: userId,
-      }
+  private supabase: ReturnType<typeof createClient>
 
-      await supabase.from("edge_function_metrics").insert(metric)
-
-      // Also log errors separately for detailed tracking
-      if (error) {
-        await this.logError(functionName, action, error, userId)
-      }
-    } catch (err) {
-      console.error("Failed to track function call:", err)
-    }
+  constructor(supabaseUrl: string, supabaseKey: string) {
+    this.supabase = createClient(supabaseUrl, supabaseKey)
   }
 
-  async logError(
+  // Track Edge Function performance
+  async trackFunctionCall(
     functionName: string,
-    action: string,
-    error: Error,
+    action: string | undefined,
+    responseTimeMs: number,
+    success: boolean,
     userId?: string,
     metadata?: Record<string, any>,
   ): Promise<void> {
     try {
-      const errorLog: ErrorLog = {
+      const { error } = await this.supabase.from("edge_function_metrics").insert({
         function_name: functionName,
         action,
-        error_message: error.message,
-        stack_trace: error.stack,
+        response_time_ms: responseTimeMs,
+        success,
         user_id: userId,
-        metadata,
-      }
+        metadata: metadata || {},
+      })
 
-      await supabase.from("error_logs").insert(errorLog)
+      if (error) {
+        console.error("Failed to track function call:", error)
+      }
     } catch (err) {
-      console.error("Failed to log error:", err)
+      console.error("Error tracking function call:", err)
     }
   }
 
+  // Record system health check
   async recordHealthCheck(
     serviceName: string,
     status: "healthy" | "degraded" | "down",
-    responseTime: number,
-    error?: string,
+    responseTimeMs?: number,
     metadata?: Record<string, any>,
   ): Promise<void> {
     try {
-      const healthCheck: SystemHealthCheck = {
+      const { error } = await this.supabase.from("system_health_checks").insert({
         service_name: serviceName,
         status,
-        response_time_ms: responseTime,
-        error_message: error,
-        metadata,
-      }
-
-      await supabase.from("system_health_checks").insert(healthCheck)
-    } catch (err) {
-      console.error("Failed to record health check:", err)
-    }
-  }
-
-  async getMetrics(
-    functionName?: string,
-    timeRange: "hour" | "day" | "week" = "hour",
-  ): Promise<{
-    totalRequests: number
-    successRate: number
-    avgResponseTime: number
-    p95ResponseTime: number
-    p99ResponseTime: number
-    errorCount: number
-  }> {
-    try {
-      const timeFilter = this.getTimeFilter(timeRange)
-
-      let query = supabase.from("edge_function_metrics").select("*").gte("created_at", timeFilter)
-
-      if (functionName) {
-        query = query.eq("function_name", functionName)
-      }
-
-      const { data: metrics, error } = await query
-
-      if (error) throw error
-
-      if (!metrics || metrics.length === 0) {
-        return {
-          totalRequests: 0,
-          successRate: 0,
-          avgResponseTime: 0,
-          p95ResponseTime: 0,
-          p99ResponseTime: 0,
-          errorCount: 0,
-        }
-      }
-
-      const totalRequests = metrics.length
-      const successfulRequests = metrics.filter((m) => m.success).length
-      const successRate = (successfulRequests / totalRequests) * 100
-      const errorCount = totalRequests - successfulRequests
-
-      const responseTimes = metrics.map((m) => m.response_time_ms).sort((a, b) => a - b)
-      const avgResponseTime = responseTimes.reduce((sum, time) => sum + time, 0) / responseTimes.length
-      const p95ResponseTime = responseTimes[Math.floor(responseTimes.length * 0.95)]
-      const p99ResponseTime = responseTimes[Math.floor(responseTimes.length * 0.99)]
-
-      return {
-        totalRequests,
-        successRate,
-        avgResponseTime: Math.round(avgResponseTime),
-        p95ResponseTime: p95ResponseTime || 0,
-        p99ResponseTime: p99ResponseTime || 0,
-        errorCount,
-      }
-    } catch (error) {
-      console.error("Failed to get metrics:", error)
-      throw error
-    }
-  }
-
-  async getSystemHealth(): Promise<{
-    services: Array<{
-      name: string
-      status: "healthy" | "degraded" | "down"
-      lastCheck: string
-      responseTime: number
-    }>
-    overallStatus: "healthy" | "degraded" | "down"
-  }> {
-    try {
-      const { data: healthChecks, error } = await supabase
-        .from("system_health_checks")
-        .select("*")
-        .gte("created_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()) // Last 5 minutes
-        .order("created_at", { ascending: false })
-
-      if (error) throw error
-
-      const serviceMap = new Map()
-
-      healthChecks?.forEach((check) => {
-        if (!serviceMap.has(check.service_name)) {
-          serviceMap.set(check.service_name, check)
-        }
+        response_time_ms: responseTimeMs,
+        metadata: metadata || {},
       })
 
-      const services = Array.from(serviceMap.values()).map((check) => ({
-        name: check.service_name,
-        status: check.status,
-        lastCheck: check.created_at,
-        responseTime: check.response_time_ms,
-      }))
-
-      // Determine overall status
-      let overallStatus: "healthy" | "degraded" | "down" = "healthy"
-      const downServices = services.filter((s) => s.status === "down")
-      const degradedServices = services.filter((s) => s.status === "degraded")
-
-      if (downServices.length > 0) {
-        overallStatus = "down"
-      } else if (degradedServices.length > 0) {
-        overallStatus = "degraded"
+      if (error) {
+        console.error("Failed to record health check:", error)
       }
-
-      return { services, overallStatus }
-    } catch (error) {
-      console.error("Failed to get system health:", error)
-      throw error
+    } catch (err) {
+      console.error("Error recording health check:", err)
     }
   }
 
+  // Log error with details
+  async logError(
+    functionName: string,
+    errorMessage: string,
+    stackTrace?: string,
+    userId?: string,
+    metadata?: Record<string, any>,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase.from("error_logs").insert({
+        function_name: functionName,
+        error_message: errorMessage,
+        stack_trace: stackTrace,
+        user_id: userId,
+        metadata: metadata || {},
+      })
+
+      if (error) {
+        console.error("Failed to log error:", error)
+      }
+    } catch (err) {
+      console.error("Error logging error:", err)
+    }
+  }
+
+  // Get monitoring summary
+  async getMonitoringSummary(): Promise<MonitoringSummary[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from("monitoring_summary")
+        .select("*")
+        .order("hour_bucket", { ascending: false })
+        .limit(100)
+
+      if (error) {
+        console.error("Failed to get monitoring summary:", error)
+        return []
+      }
+
+      return data || []
+    } catch (err) {
+      console.error("Error getting monitoring summary:", err)
+      return []
+    }
+  }
+
+  // Get recent errors
   async getRecentErrors(limit = 50): Promise<ErrorLog[]> {
     try {
-      const { data: errors, error } = await supabase
+      const { data, error } = await this.supabase
         .from("error_logs")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(limit)
 
-      if (error) throw error
-      return errors || []
-    } catch (error) {
-      console.error("Failed to get recent errors:", error)
-      throw error
+      if (error) {
+        console.error("Failed to get recent errors:", error)
+        return []
+      }
+
+      return data || []
+    } catch (err) {
+      console.error("Error getting recent errors:", err)
+      return []
     }
   }
 
-  private getTimeFilter(timeRange: "hour" | "day" | "week"): string {
-    const now = new Date()
-    let timeAgo: Date
+  // Get system health status
+  async getSystemHealth(): Promise<SystemHealthCheck[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from("system_health_checks")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100)
 
-    switch (timeRange) {
-      case "hour":
-        timeAgo = new Date(now.getTime() - 60 * 60 * 1000)
-        break
-      case "day":
-        timeAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-        break
-      case "week":
-        timeAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        break
+      if (error) {
+        console.error("Failed to get system health:", error)
+        return []
+      }
+
+      return data || []
+    } catch (err) {
+      console.error("Error getting system health:", err)
+      return []
     }
+  }
 
-    return timeAgo.toISOString()
+  // Cleanup old data
+  async cleanupOldData(): Promise<void> {
+    try {
+      const { error } = await this.supabase.rpc("cleanup_old_metrics")
+
+      if (error) {
+        console.error("Failed to cleanup old data:", error)
+      }
+    } catch (err) {
+      console.error("Error cleaning up old data:", err)
+    }
   }
 }
 
-export const monitoring = new MonitoringService()
+// Wrapper function for easy Edge Function monitoring
+export async function withMonitoring<T>(
+  functionName: string,
+  action: string,
+  fn: () => Promise<T>,
+  userId?: string,
+): Promise<T> {
+  const startTime = Date.now()
+  let success = false
+  let error: Error | null = null
+
+  try {
+    const result = await fn()
+    success = true
+    return result
+  } catch (err) {
+    error = err as Error
+    throw err
+  } finally {
+    const responseTime = Date.now() - startTime
+
+    // Initialize monitoring service
+    const monitoring = new MonitoringService(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+
+    // Track the function call
+    await monitoring.trackFunctionCall(functionName, action, responseTime, success, userId)
+
+    // Log error if one occurred
+    if (error) {
+      await monitoring.logError(functionName, error.message, error.stack, userId, { action })
+    }
+  }
+}
+
+// Health check wrapper
+export async function healthCheck(serviceName: string, checkFn: () => Promise<boolean>): Promise<void> {
+  const startTime = Date.now()
+  let status: "healthy" | "degraded" | "down" = "down"
+
+  try {
+    const isHealthy = await checkFn()
+    const responseTime = Date.now() - startTime
+
+    if (isHealthy) {
+      status = responseTime > 1000 ? "degraded" : "healthy"
+    }
+
+    const monitoring = new MonitoringService(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+
+    await monitoring.recordHealthCheck(serviceName, status, responseTime)
+  } catch (err) {
+    const responseTime = Date.now() - startTime
+
+    const monitoring = new MonitoringService(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+
+    await monitoring.recordHealthCheck(serviceName, "down", responseTime, {
+      error: (err as Error).message,
+    })
+  }
+}
+
+// Export default monitoring instance
+export const monitoring = new MonitoringService(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+)

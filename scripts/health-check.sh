@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# Health check script for FluffyPet Edge Functions
-# This script tests all Edge Functions and reports their status
-
-set -e
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,105 +7,141 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-SUPABASE_PROJECT_REF=${SUPABASE_PROJECT_REF:-""}
-BASE_URL="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1"
-TIMEOUT=30
-FUNCTIONS=("auth" "media" "chat" "ai")
+echo -e "${BLUE}🏥 FluffyPet Health Check${NC}"
+echo "=========================="
 
 # Check if required environment variables are set
-if [ -z "$SUPABASE_PROJECT_REF" ]; then
-    echo -e "${RED}❌ SUPABASE_PROJECT_REF environment variable is not set${NC}"
+if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ]; then
+    echo -e "${RED}❌ Error: NEXT_PUBLIC_SUPABASE_URL environment variable is not set${NC}"
     exit 1
 fi
 
-echo -e "${BLUE}🏥 FluffyPet Health Check${NC}"
-echo "=================================="
-echo "Base URL: $BASE_URL"
-echo "Timeout: ${TIMEOUT}s"
+if [ -z "$SUPABASE_ANON_KEY" ]; then
+    echo -e "${RED}❌ Error: SUPABASE_ANON_KEY environment variable is not set${NC}"
+    exit 1
+fi
+
+SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL"
+SUPABASE_KEY="$SUPABASE_ANON_KEY"
+
+echo -e "${GREEN}✅ Environment variables configured${NC}"
 echo ""
 
-# Function to test a single Edge Function
-test_function() {
-    local func_name=$1
-    local url="${BASE_URL}/${func_name}"
+# Function to check Edge Function health
+check_edge_function() {
+    local function_name=$1
+    local endpoint="$SUPABASE_URL/functions/v1/$function_name/health"
     
-    echo -e "${YELLOW}🔍 Testing ${func_name} function...${NC}"
+    echo -e "${YELLOW}🔍 Checking $function_name...${NC}"
     
-    # Test health check endpoint
-    local start_time=$(date +%s%3N)
-    local response=$(curl -s -w "%{http_code}|%{time_total}" \
-        --max-time $TIMEOUT \
-        -X POST "$url" \
+    # Make request with timeout
+    response=$(curl -s -w "%{http_code}" -m 10 \
+        -H "Authorization: Bearer $SUPABASE_KEY" \
         -H "Content-Type: application/json" \
-        -d '{"action":"health-check"}' 2>/dev/null || echo "000|0")
+        "$endpoint" 2>/dev/null)
     
-    local end_time=$(date +%s%3N)
-    local http_code=$(echo "$response" | cut -d'|' -f1)
-    local response_time=$(echo "$response" | cut -d'|' -f2)
-    local duration=$((end_time - start_time))
+    # Extract HTTP status code (last 3 characters)
+    http_code="${response: -3}"
+    response_body="${response%???}"
     
-    # Determine status based on HTTP code
-    case $http_code in
-        200)
-            echo -e "${GREEN}✅ ${func_name}: Healthy (${duration}ms)${NC}"
-            return 0
-            ;;
-        400|404|405)
-            echo -e "${YELLOW}⚠️  ${func_name}: Responding but may have issues (HTTP ${http_code}, ${duration}ms)${NC}"
-            return 1
-            ;;
-        500|502|503|504)
-            echo -e "${RED}❌ ${func_name}: Server error (HTTP ${http_code}, ${duration}ms)${NC}"
-            return 2
-            ;;
-        000)
-            echo -e "${RED}❌ ${func_name}: Connection failed or timeout${NC}"
-            return 2
-            ;;
-        *)
-            echo -e "${RED}❌ ${func_name}: Unexpected response (HTTP ${http_code}, ${duration}ms)${NC}"
-            return 2
-            ;;
-    esac
+    if [ "$http_code" = "200" ]; then
+        echo -e "${GREEN}  ✅ $function_name is healthy${NC}"
+        return 0
+    elif [ "$http_code" = "000" ]; then
+        echo -e "${RED}  ❌ $function_name is unreachable (timeout)${NC}"
+        return 1
+    else
+        echo -e "${RED}  ❌ $function_name returned HTTP $http_code${NC}"
+        return 1
+    fi
 }
 
-# Test all functions
-healthy_count=0
-warning_count=0
-error_count=0
+# Function to check database connection
+check_database() {
+    echo -e "${YELLOW}🔍 Checking database connection...${NC}"
+    
+    response=$(curl -s -w "%{http_code}" -m 10 \
+        -H "apikey: $SUPABASE_KEY" \
+        -H "Authorization: Bearer $SUPABASE_KEY" \
+        "$SUPABASE_URL/rest/v1/profiles?select=count&limit=1" 2>/dev/null)
+    
+    http_code="${response: -3}"
+    
+    if [ "$http_code" = "200" ]; then
+        echo -e "${GREEN}  ✅ Database is accessible${NC}"
+        return 0
+    else
+        echo -e "${RED}  ❌ Database connection failed (HTTP $http_code)${NC}"
+        return 1
+    fi
+}
 
-for func in "${FUNCTIONS[@]}"; do
-    test_function "$func"
-    case $? in
-        0) ((healthy_count++)) ;;
-        1) ((warning_count++)) ;;
-        2) ((error_count++)) ;;
-    esac
-    echo ""
+# Function to check monitoring tables
+check_monitoring_tables() {
+    echo -e "${YELLOW}🔍 Checking monitoring tables...${NC}"
+    
+    tables=("edge_function_metrics" "system_health_checks" "error_logs")
+    
+    for table in "${tables[@]}"; do
+        response=$(curl -s -w "%{http_code}" -m 10 \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/$table?select=count&limit=1" 2>/dev/null)
+        
+        http_code="${response: -3}"
+        
+        if [ "$http_code" = "200" ]; then
+            echo -e "${GREEN}  ✅ Table $table is accessible${NC}"
+        else
+            echo -e "${RED}  ❌ Table $table is not accessible (HTTP $http_code)${NC}"
+        fi
+    done
+}
+
+# Start health checks
+echo -e "${BLUE}🚀 Starting health checks...${NC}"
+echo ""
+
+# Check database first
+check_database
+db_status=$?
+
+echo ""
+
+# Check monitoring infrastructure
+check_monitoring_tables
+
+echo ""
+
+# Check Edge Functions
+edge_functions=("auth" "media" "chat" "ai")
+healthy_functions=0
+total_functions=${#edge_functions[@]}
+
+for func in "${edge_functions[@]}"; do
+    if check_edge_function "$func"; then
+        ((healthy_functions++))
+    fi
 done
 
-# Summary
-echo "=================================="
+echo ""
 echo -e "${BLUE}📊 Health Check Summary${NC}"
-echo ""
-echo -e "${GREEN}✅ Healthy: ${healthy_count}${NC}"
-echo -e "${YELLOW}⚠️  Warnings: ${warning_count}${NC}"
-echo -e "${RED}❌ Errors: ${error_count}${NC}"
-echo ""
+echo "========================"
 
-# Overall status
-total_functions=${#FUNCTIONS[@]}
-if [ $error_count -eq 0 ] && [ $warning_count -eq 0 ]; then
-    echo -e "${GREEN}🎉 All systems operational!${NC}"
-    exit 0
-elif [ $error_count -eq 0 ]; then
-    echo -e "${YELLOW}⚠️  Some functions have warnings but are operational${NC}"
-    exit 1
-elif [ $error_count -lt $total_functions ]; then
-    echo -e "${RED}🚨 Some functions are down - partial outage${NC}"
-    exit 2
+if [ $db_status -eq 0 ]; then
+    echo -e "${GREEN}✅ Database: Healthy${NC}"
 else
-    echo -e "${RED}🚨 All functions are down - complete outage${NC}"
-    exit 3
+    echo -e "${RED}❌ Database: Unhealthy${NC}"
+fi
+
+echo -e "${BLUE}📈 Edge Functions: $healthy_functions/$total_functions healthy${NC}"
+
+if [ $healthy_functions -eq $total_functions ] && [ $db_status -eq 0 ]; then
+    echo ""
+    echo -e "${GREEN}🎉 All systems are healthy!${NC}"
+    exit 0
+else
+    echo ""
+    echo -e "${YELLOW}⚠️  Some systems need attention${NC}"
+    exit 1
 fi
