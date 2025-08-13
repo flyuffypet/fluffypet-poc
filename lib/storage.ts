@@ -6,30 +6,62 @@ export interface UploadResult {
   error?: string
 }
 
+export interface UploadOptions {
+  bucket?: string
+  folder?: string
+  maxSize?: number
+  allowedTypes?: string[]
+}
+
 export class StorageService {
   private supabase = createClient()
+  private defaultBucket = "media"
 
-  async uploadFile(
-    bucket: string,
-    path: string,
-    file: File,
-    options?: {
-      cacheControl?: string
-      contentType?: string
-      upsert?: boolean
-    },
-  ): Promise<UploadResult> {
+  async uploadFile(file: File, options: UploadOptions = {}): Promise<UploadResult> {
     try {
+      const {
+        bucket = this.defaultBucket,
+        folder = "uploads",
+        maxSize = 10 * 1024 * 1024, // 10MB
+        allowedTypes = ["image/*", "application/pdf", "text/*"],
+      } = options
+
+      // Validate file size
+      if (file.size > maxSize) {
+        return { url: "", path: "", error: "File too large" }
+      }
+
+      // Validate file type
+      const isAllowed = allowedTypes.some((type) => {
+        if (type.endsWith("/*")) {
+          return file.type.startsWith(type.slice(0, -1))
+        }
+        return file.type === type
+      })
+
+      if (!isAllowed) {
+        return { url: "", path: "", error: "File type not allowed" }
+      }
+
+      // Generate unique filename
+      const timestamp = Date.now()
+      const randomString = Math.random().toString(36).substring(2)
+      const extension = file.name.split(".").pop()
+      const filename = `${timestamp}_${randomString}.${extension}`
+      const path = `${folder}/${filename}`
+
+      // Upload file
       const { data, error } = await this.supabase.storage.from(bucket).upload(path, file, {
-        cacheControl: options?.cacheControl || "3600",
-        contentType: options?.contentType || file.type,
-        upsert: options?.upsert || false,
+        cacheControl: "3600",
+        upsert: false,
       })
 
       if (error) {
+        console.error("Upload error:", error)
         return { url: "", path: "", error: error.message }
       }
 
+      // Get public URL
       const { data: urlData } = this.supabase.storage.from(bucket).getPublicUrl(data.path)
 
       return {
@@ -37,6 +69,7 @@ export class StorageService {
         path: data.path,
       }
     } catch (error) {
+      console.error("Storage service error:", error)
       return {
         url: "",
         path: "",
@@ -45,52 +78,42 @@ export class StorageService {
     }
   }
 
-  async deleteFile(bucket: string, path: string): Promise<{ error?: string }> {
+  async deleteFile(path: string, bucket = this.defaultBucket): Promise<boolean> {
     try {
       const { error } = await this.supabase.storage.from(bucket).remove([path])
 
       if (error) {
-        return { error: error.message }
+        console.error("Delete error:", error)
+        return false
       }
 
-      return {}
+      return true
     } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : "Delete failed",
-      }
+      console.error("Delete service error:", error)
+      return false
     }
   }
 
-  async getSignedUrl(bucket: string, path: string, expiresIn = 3600): Promise<{ url?: string; error?: string }> {
+  async getSignedUrl(path: string, expiresIn = 3600, bucket = this.defaultBucket): Promise<string | null> {
     try {
       const { data, error } = await this.supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 
       if (error) {
-        return { error: error.message }
+        console.error("Signed URL error:", error)
+        return null
       }
 
-      return { url: data.signedUrl }
+      return data.signedUrl
     } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : "Failed to get signed URL",
-      }
+      console.error("Signed URL service error:", error)
+      return null
     }
   }
 
-  async listFiles(bucket: string, path?: string): Promise<{ files?: any[]; error?: string }> {
-    try {
-      const { data, error } = await this.supabase.storage.from(bucket).list(path)
+  getPublicUrl(path: string, bucket = this.defaultBucket): string {
+    const { data } = this.supabase.storage.from(bucket).getPublicUrl(path)
 
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { files: data }
-    } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : "Failed to list files",
-      }
-    }
+    return data.publicUrl
   }
 }
 

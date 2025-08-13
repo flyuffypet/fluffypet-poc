@@ -3,129 +3,101 @@ import { createClient } from "@/lib/supabase-client"
 export interface EdgeFunctionResponse<T = any> {
   data?: T
   error?: string
+  success: boolean
 }
 
-class EdgeFunctions {
+export class EdgeFunctionsService {
   private supabase = createClient()
 
-  async getCurrentUserToken(): Promise<string | null> {
-    const {
-      data: { session },
-    } = await this.supabase.auth.getSession()
-    return session?.access_token || null
-  }
-
-  async invokeFunction<T = any>(
-    functionName: string,
-    body?: any,
-    options?: {
-      headers?: Record<string, string>
-    },
-  ): Promise<EdgeFunctionResponse<T>> {
+  async invokeFunction<T = any>(functionName: string, payload?: any): Promise<EdgeFunctionResponse<T>> {
     try {
-      const token = await this.getCurrentUserToken()
-
       const { data, error } = await this.supabase.functions.invoke(functionName, {
-        body,
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-          ...options?.headers,
-        },
+        body: payload,
       })
 
       if (error) {
-        return { error: error.message }
+        console.error(`Edge function ${functionName} error:`, error)
+        return {
+          success: false,
+          error: error.message,
+        }
       }
 
-      return { data }
-    } catch (error) {
       return {
-        error: error instanceof Error ? error.message : "Function invocation failed",
+        success: true,
+        data,
+      }
+    } catch (error) {
+      console.error(`Edge function ${functionName} exception:`, error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Function call failed",
       }
     }
   }
 
   // Auth functions
-  async signUp(email: string, password: string, metadata?: any) {
+  async sendWelcomeEmail(userId: string, email: string) {
     return this.invokeFunction("auth", {
-      action: "signup",
-      email,
-      password,
-      metadata,
-    })
-  }
-
-  async signIn(email: string, password: string) {
-    return this.invokeFunction("auth", {
-      action: "signin",
-      email,
-      password,
-    })
-  }
-
-  async resetPassword(email: string) {
-    return this.invokeFunction("auth", {
-      action: "reset-password",
+      action: "send_welcome_email",
+      userId,
       email,
     })
   }
 
-  // Chat functions
-  async sendMessage(chatId: string, message: string, recipientId: string) {
-    return this.invokeFunction("chat", {
-      action: "send-message",
-      chatId,
-      message,
-      recipientId,
-    })
-  }
-
-  async getChatHistory(chatId: string, limit?: number) {
-    return this.invokeFunction("chat", {
-      action: "get-history",
-      chatId,
-      limit,
-    })
-  }
-
-  async createChat(participantIds: string[]) {
-    return this.invokeFunction("chat", {
-      action: "create-chat",
-      participantIds,
+  async sendPasswordResetEmail(email: string) {
+    return this.invokeFunction("auth", {
+      action: "send_password_reset",
+      email,
     })
   }
 
   // Media functions
-  async processMedia(fileUrl: string, operations: any[]) {
+  async processImage(imageUrl: string, transformations: any) {
     return this.invokeFunction("media", {
-      action: "process",
-      fileUrl,
-      operations,
+      action: "process_image",
+      imageUrl,
+      transformations,
     })
   }
 
-  async generateThumbnail(fileUrl: string, width: number, height: number) {
+  async generateThumbnail(imageUrl: string, size = 200) {
     return this.invokeFunction("media", {
-      action: "generate-thumbnail",
-      fileUrl,
-      width,
-      height,
+      action: "generate_thumbnail",
+      imageUrl,
+      size,
+    })
+  }
+
+  // Chat functions
+  async sendMessage(conversationId: string, message: any) {
+    return this.invokeFunction("chat", {
+      action: "send_message",
+      conversationId,
+      message,
+    })
+  }
+
+  async createConversation(participants: string[]) {
+    return this.invokeFunction("chat", {
+      action: "create_conversation",
+      participants,
     })
   }
 
   // AI functions
-  async analyzeImage(imageUrl: string, prompt?: string) {
+  async analyzePetHealth(petData: any, symptoms?: string[]) {
     return this.invokeFunction("ai", {
-      action: "analyze-image",
-      imageUrl,
-      prompt,
+      action: "analyze_pet_health",
+      petData,
+      symptoms,
     })
   }
 
-  async generateInsights(petData: any) {
+  async generateHealthInsights(petId: string) {
     return this.invokeFunction("ai", {
-      action: "generate-insights",
-      petData,
+      action: "generate_health_insights",
+      petId,
     })
   }
 
@@ -138,31 +110,35 @@ class EdgeFunctions {
   }
 }
 
-export const edgeFunctions = new EdgeFunctions()
+export const edgeFunctions = new EdgeFunctionsService()
 
-// Export individual function groups for convenience
+// Specific function helpers
 export const authFunctions = {
-  signUp: edgeFunctions.signUp.bind(edgeFunctions),
-  signIn: edgeFunctions.signIn.bind(edgeFunctions),
-  resetPassword: edgeFunctions.resetPassword.bind(edgeFunctions),
-}
-
-export const chatFunctions = {
-  sendMessage: edgeFunctions.sendMessage.bind(edgeFunctions),
-  getChatHistory: edgeFunctions.getChatHistory.bind(edgeFunctions),
-  createChat: edgeFunctions.createChat.bind(edgeFunctions),
+  sendWelcomeEmail: (userId: string, email: string) => edgeFunctions.sendWelcomeEmail(userId, email),
+  sendPasswordResetEmail: (email: string) => edgeFunctions.sendPasswordResetEmail(email),
 }
 
 export const mediaFunctions = {
-  processMedia: edgeFunctions.processMedia.bind(edgeFunctions),
-  generateThumbnail: edgeFunctions.generateThumbnail.bind(edgeFunctions),
+  processImage: (imageUrl: string, transformations: any) => edgeFunctions.processImage(imageUrl, transformations),
+  generateThumbnail: (imageUrl: string, size?: number) => edgeFunctions.generateThumbnail(imageUrl, size),
+}
+
+export const chatFunctions = {
+  sendMessage: (conversationId: string, message: any) => edgeFunctions.sendMessage(conversationId, message),
+  createConversation: (participants: string[]) => edgeFunctions.createConversation(participants),
 }
 
 export const aiFunctions = {
-  analyzeImage: edgeFunctions.analyzeImage.bind(edgeFunctions),
-  generateInsights: edgeFunctions.generateInsights.bind(edgeFunctions),
-  chatWithAI: edgeFunctions.chatWithAI.bind(edgeFunctions),
+  analyzePetHealth: (petData: any, symptoms?: string[]) => edgeFunctions.analyzePetHealth(petData, symptoms),
+  generateHealthInsights: (petId: string) => edgeFunctions.generateHealthInsights(petId),
+  chatWithAI: (message: string, context?: any) => edgeFunctions.chatWithAI(message, context),
 }
 
-export const getCurrentUserToken = edgeFunctions.getCurrentUserToken.bind(edgeFunctions)
-export default edgeFunctions
+// Helper to get current user token for authenticated requests
+export async function getCurrentUserToken(): Promise<string | null> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  return session?.access_token || null
+}

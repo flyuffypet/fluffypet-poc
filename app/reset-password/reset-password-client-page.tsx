@@ -1,26 +1,19 @@
 "use client"
 
-import { Suspense } from "react"
-import ResetPasswordForm from "@/components/auth/reset-password-form"
-
-function ResetPasswordContent() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <ResetPasswordForm />
-    </div>
-  )
-}
+import { useSearchParams } from "next/navigation"
+import { ResetPasswordForm } from "@/components/auth/reset-password-form"
 
 export default function ResetPasswordClientPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      }
-    >
-      <ResetPasswordContent />
-    </Suspense>
-  )
+  const searchParams = useSearchParams()
+  const accessToken = searchParams.get("access_token")
+  const refreshToken = searchParams.get("refresh_token")
+  const type = searchParams.get("type")
+
+  // If we have tokens and type is recovery, show update form
+  if (accessToken && refreshToken && type === "recovery") {
+    return <ResetPasswordForm mode="update" accessToken={accessToken} refreshToken={refreshToken} />
+  }
+
+  // Otherwise show request form
+  return <ResetPasswordForm mode="request" />
 }

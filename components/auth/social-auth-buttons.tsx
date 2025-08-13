@@ -1,62 +1,81 @@
 "use client"
 
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase-client"
-import { FaGoogle, FaGithub } from "react-icons/fa"
+import { Button } from "@/components/ui/button"
+import { Icons } from "@/components/ui/icons"
+import { useRouter } from "next/navigation"
+import { toast } from "@/hooks/use-toast"
 
 interface SocialAuthButtonsProps {
   redirectTo?: string
 }
 
-export default function SocialAuthButtons({ redirectTo = "/dashboard" }: SocialAuthButtonsProps) {
-  const [loading, setLoading] = useState<string | null>(null)
+export function SocialAuthButtons({ redirectTo = "/dashboard" }: SocialAuthButtonsProps) {
+  const [isLoading, setIsLoading] = useState<string | null>(null)
+  const router = useRouter()
   const supabase = createClient()
 
   const handleSocialAuth = async (provider: "google" | "github") => {
     try {
-      setLoading(provider)
+      setIsLoading(provider)
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectTo)}`,
+          redirectTo: `${window.location.origin}/auth/callback?redirect=${redirectTo}`,
         },
       })
 
       if (error) {
-        console.error(`${provider} auth error:`, error.message)
+        toast({
+          title: "Authentication Error",
+          description: error.message,
+          variant: "destructive",
+        })
       }
     } catch (error) {
-      console.error(`${provider} auth error:`, error)
+      toast({
+        title: "Authentication Error",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
     } finally {
-      setLoading(null)
+      setIsLoading(null)
     }
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-2 gap-3">
       <Button
         variant="outline"
-        className="w-full bg-transparent"
         onClick={() => handleSocialAuth("google")}
-        disabled={loading !== null}
+        disabled={isLoading !== null}
+        className="w-full"
       >
-        <FaGoogle className="mr-2 h-4 w-4" />
-        {loading === "google" ? "Connecting..." : "Continue with Google"}
+        {isLoading === "google" ? (
+          <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Icons.google className="mr-2 h-4 w-4" />
+        )}
+        Google
       </Button>
 
       <Button
         variant="outline"
-        className="w-full bg-transparent"
         onClick={() => handleSocialAuth("github")}
-        disabled={loading !== null}
+        disabled={isLoading !== null}
+        className="w-full"
       >
-        <FaGithub className="mr-2 h-4 w-4" />
-        {loading === "github" ? "Connecting..." : "Continue with GitHub"}
+        {isLoading === "github" ? (
+          <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Icons.github className="mr-2 h-4 w-4" />
+        )}
+        GitHub
       </Button>
     </div>
   )
 }
 
-export { SocialAuthButtons }
+export default SocialAuthButtons
