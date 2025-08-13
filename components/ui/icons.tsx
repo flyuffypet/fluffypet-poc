@@ -25,7 +25,7 @@ export const Icons = {
       />
     </svg>
   ),
-  github: (props: React.SVGProps<SVGSVGElement>) => (
+  gitHub: (props: React.SVGProps<SVGSVGElement>) => (
     <svg viewBox="0 0 24 24" {...props}>
       <path
         fill="currentColor"

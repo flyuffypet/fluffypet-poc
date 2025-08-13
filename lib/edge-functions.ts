@@ -1,76 +1,106 @@
 "use client"
 
-interface EdgeFunctionResponse<T = any> {
+import { createClient } from "@/lib/supabase-client"
+
+export interface EdgeFunctionResponse<T = any> {
   data?: T
   error?: string
 }
 
-class EdgeFunctionsService {
-  private baseUrl = "/api"
+export class EdgeFunctionsService {
+  private supabase = createClient()
 
-  async callFunction<T = any>(
-    functionName: string,
-    payload?: any,
-    options?: RequestInit,
-  ): Promise<EdgeFunctionResponse<T>> {
+  async invokeFunction<T = any>(functionName: string, payload?: any): Promise<EdgeFunctionResponse<T>> {
     try {
-      const response = await fetch(`${this.baseUrl}/${functionName}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...options?.headers,
-        },
-        body: payload ? JSON.stringify(payload) : undefined,
-        ...options,
+      const { data, error } = await this.supabase.functions.invoke(functionName, {
+        body: payload,
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      if (error) {
+        return { error: error.message }
       }
 
-      const data = await response.json()
       return { data }
     } catch (error) {
       return {
-        error: error instanceof Error ? error.message : "Function call failed",
+        error: error instanceof Error ? error.message : "Function invocation failed",
       }
     }
   }
 
   // Auth functions
-  async signUp(email: string, password: string) {
-    return this.callFunction("auth/signup", { email, password })
+  async getCurrentUserToken(): Promise<EdgeFunctionResponse<{ token: string }>> {
+    return this.invokeFunction("auth", { action: "get-token" })
   }
 
-  async signIn(email: string, password: string) {
-    return this.callFunction("auth/signin", { email, password })
-  }
-
-  async resetPassword(email: string) {
-    return this.callFunction("auth/reset-password", { email })
-  }
-
-  // Chat functions
-  async sendMessage(conversationId: string, message: string) {
-    return this.callFunction("chat/send", { conversationId, message })
-  }
-
-  async getMessages(conversationId: string) {
-    return this.callFunction("chat/messages", { conversationId })
-  }
-
-  // AI functions
-  async analyzeHealthData(petData: any) {
-    return this.callFunction("ai/health-analysis", { petData })
-  }
-
-  async generateInsights(petId: string) {
-    return this.callFunction("ai/insights", { petId })
+  async refreshUserSession(): Promise<EdgeFunctionResponse<{ session: any }>> {
+    return this.invokeFunction("auth", { action: "refresh-session" })
   }
 
   // Media functions
-  async processMedia(fileUrl: string, type: string) {
-    return this.callFunction("media/process", { fileUrl, type })
+  async processImage(
+    imageUrl: string,
+    options: {
+      width?: number
+      height?: number
+      quality?: number
+      format?: string
+    },
+  ): Promise<EdgeFunctionResponse<{ processedUrl: string }>> {
+    return this.invokeFunction("media", {
+      action: "process-image",
+      imageUrl,
+      options,
+    })
+  }
+
+  async generateThumbnail(imageUrl: string, size = 150): Promise<EdgeFunctionResponse<{ thumbnailUrl: string }>> {
+    return this.invokeFunction("media", {
+      action: "generate-thumbnail",
+      imageUrl,
+      size,
+    })
+  }
+
+  // Chat functions
+  async sendMessage(
+    conversationId: string,
+    message: string,
+    attachments?: string[],
+  ): Promise<EdgeFunctionResponse<{ messageId: string }>> {
+    return this.invokeFunction("chat", {
+      action: "send-message",
+      conversationId,
+      message,
+      attachments,
+    })
+  }
+
+  async createConversation(
+    participants: string[],
+    type: "direct" | "group" = "direct",
+  ): Promise<EdgeFunctionResponse<{ conversationId: string }>> {
+    return this.invokeFunction("chat", {
+      action: "create-conversation",
+      participants,
+      type,
+    })
+  }
+
+  // AI functions
+  async analyzeHealthData(petId: string, healthData: any): Promise<EdgeFunctionResponse<{ insights: any[] }>> {
+    return this.invokeFunction("ai", {
+      action: "analyze-health",
+      petId,
+      healthData,
+    })
+  }
+
+  async generateHealthRecommendations(petId: string): Promise<EdgeFunctionResponse<{ recommendations: any[] }>> {
+    return this.invokeFunction("ai", {
+      action: "generate-recommendations",
+      petId,
+    })
   }
 }
 
@@ -79,16 +109,20 @@ export const edgeFunctions = new EdgeFunctionsService()
 // Export individual functions for convenience
 export const chatFunctions = {
   sendMessage: edgeFunctions.sendMessage.bind(edgeFunctions),
-  getMessages: edgeFunctions.getMessages.bind(edgeFunctions),
+  createConversation: edgeFunctions.createConversation.bind(edgeFunctions),
 }
 
-export const authFunctions = {
-  signUp: edgeFunctions.signUp.bind(edgeFunctions),
-  signIn: edgeFunctions.signIn.bind(edgeFunctions),
-  resetPassword: edgeFunctions.resetPassword.bind(edgeFunctions),
+export const mediaFunctions = {
+  processImage: edgeFunctions.processImage.bind(edgeFunctions),
+  generateThumbnail: edgeFunctions.generateThumbnail.bind(edgeFunctions),
 }
 
 export const aiFunctions = {
   analyzeHealthData: edgeFunctions.analyzeHealthData.bind(edgeFunctions),
-  generateInsights: edgeFunctions.generateInsights.bind(edgeFunctions),
+  generateHealthRecommendations: edgeFunctions.generateHealthRecommendations.bind(edgeFunctions),
+}
+
+export const authFunctions = {
+  getCurrentUserToken: edgeFunctions.getCurrentUserToken.bind(edgeFunctions),
+  refreshUserSession: edgeFunctions.refreshUserSession.bind(edgeFunctions),
 }

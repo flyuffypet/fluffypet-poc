@@ -41,18 +41,8 @@ const nextConfig = {
         tls: false,
       }
     }
-    
-    // Exclude Supabase from Edge Runtime
-    config.externals = config.externals || []
-    config.externals.push({
-      '@supabase/supabase-js': '@supabase/supabase-js',
-      '@supabase/realtime-js': '@supabase/realtime-js',
-    })
-    
     return config
   },
-  // Force static generation for problematic pages
-  output: 'standalone',
 }
 
 export default nextConfig
