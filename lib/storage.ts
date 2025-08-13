@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase-client"
-import { createServerClient } from "@/lib/supabase-server"
 
 export interface UploadResult {
   data: {
@@ -28,13 +27,7 @@ export interface StorageFile {
 }
 
 class StorageService {
-  private getClient() {
-    if (typeof window !== "undefined") {
-      return createClient()
-    } else {
-      return createServerClient()
-    }
-  }
+  private supabase = createClient()
 
   async uploadFile(
     bucket: string,
@@ -47,9 +40,7 @@ class StorageService {
     },
   ): Promise<UploadResult> {
     try {
-      const supabase = this.getClient()
-
-      const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+      const { data, error } = await this.supabase.storage.from(bucket).upload(path, file, {
         cacheControl: options?.cacheControl || "3600",
         contentType: options?.contentType,
         upsert: options?.upsert || false,
@@ -79,9 +70,7 @@ class StorageService {
 
   async deleteFile(bucket: string, paths: string[]): Promise<{ error: string | null }> {
     try {
-      const supabase = this.getClient()
-
-      const { error } = await supabase.storage.from(bucket).remove(paths)
+      const { error } = await this.supabase.storage.from(bucket).remove(paths)
 
       if (error) {
         return { error: error.message }
@@ -96,8 +85,7 @@ class StorageService {
   }
 
   getPublicUrl(bucket: string, path: string): string {
-    const supabase = this.getClient()
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path)
+    const { data } = this.supabase.storage.from(bucket).getPublicUrl(path)
     return data.publicUrl
   }
 
@@ -107,9 +95,7 @@ class StorageService {
     expiresIn = 3600,
   ): Promise<{ signedUrl: string | null; error: string | null }> {
     try {
-      const supabase = this.getClient()
-
-      const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
+      const { data, error } = await this.supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 
       if (error) {
         return { signedUrl: null, error: error.message }
@@ -126,9 +112,7 @@ class StorageService {
 
   async listFiles(bucket: string, path?: string): Promise<{ files: StorageFile[] | null; error: string | null }> {
     try {
-      const supabase = this.getClient()
-
-      const { data, error } = await supabase.storage.from(bucket).list(path)
+      const { data, error } = await this.supabase.storage.from(bucket).list(path)
 
       if (error) {
         return { files: null, error: error.message }
@@ -145,9 +129,7 @@ class StorageService {
 
   async downloadFile(bucket: string, path: string): Promise<{ data: Blob | null; error: string | null }> {
     try {
-      const supabase = this.getClient()
-
-      const { data, error } = await supabase.storage.from(bucket).download(path)
+      const { data, error } = await this.supabase.storage.from(bucket).download(path)
 
       if (error) {
         return { data: null, error: error.message }

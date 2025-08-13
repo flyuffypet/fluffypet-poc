@@ -1,217 +1,156 @@
-interface AuthResponse {
-  success: boolean
-  message?: string
-  user?: any
-  error?: string
+import { createClient } from "@/lib/supabase-client"
+
+export interface EdgeFunctionResponse<T = any> {
+  data: T | null
+  error: string | null
 }
 
-interface ChatMessage {
-  id: string
-  content: string
-  sender_id: string
-  recipient_id: string
-  created_at: string
-  read: boolean
-}
+class EdgeFunctionService {
+  private supabase = createClient()
 
-interface ChatResponse {
-  success: boolean
-  messages?: ChatMessage[]
-  message?: ChatMessage
-  error?: string
-}
+  async invokeFunction<T = any>(
+    functionName: string,
+    payload?: any,
+    options?: {
+      headers?: Record<string, string>
+      method?: "POST" | "GET" | "PUT" | "DELETE"
+    },
+  ): Promise<EdgeFunctionResponse<T>> {
+    try {
+      const { data, error } = await this.supabase.functions.invoke(functionName, {
+        body: payload,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+        },
+        method: options?.method || "POST",
+      })
 
-class EdgeFunctions {
-  private baseUrl: string
+      if (error) {
+        return { data: null, error: error.message }
+      }
 
-  constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL + "/functions/v1"
+      return { data, error: null }
+    } catch (error) {
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : "Function invocation failed",
+      }
+    }
   }
 
-  private async makeRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
-    const url = `${this.baseUrl}/${endpoint}`
+  async authenticateUser(email: string, password: string): Promise<EdgeFunctionResponse<{ user: any; session: any }>> {
+    return this.invokeFunction("auth", {
+      action: "login",
+      email,
+      password,
+    })
+  }
 
-    const response = await fetch(url, {
-      ...options,
+  async registerUser(
+    email: string,
+    password: string,
+    userData?: any,
+  ): Promise<EdgeFunctionResponse<{ user: any; session: any }>> {
+    return this.invokeFunction("auth", {
+      action: "register",
+      email,
+      password,
+      userData,
+    })
+  }
+
+  async resetPassword(email: string): Promise<EdgeFunctionResponse<{ message: string }>> {
+    return this.invokeFunction("auth", {
+      action: "reset-password",
+      email,
+    })
+  }
+
+  async updatePassword(accessToken: string, newPassword: string): Promise<EdgeFunctionResponse<{ message: string }>> {
+    return this.invokeFunction(
+      "auth",
+      {
+        action: "update-password",
+        newPassword,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    )
+  }
+
+  async sendChatMessage(
+    conversationId: string,
+    message: string,
+    senderId: string,
+  ): Promise<EdgeFunctionResponse<{ messageId: string }>> {
+    return this.invokeFunction("chat", {
+      action: "send-message",
+      conversationId,
+      message,
+      senderId,
+    })
+  }
+
+  async getChatHistory(
+    conversationId: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<EdgeFunctionResponse<{ messages: any[] }>> {
+    return this.invokeFunction("chat", {
+      action: "get-history",
+      conversationId,
+      limit,
+      offset,
+    })
+  }
+
+  async uploadMedia(
+    file: File,
+    bucket: string,
+    path?: string,
+  ): Promise<EdgeFunctionResponse<{ url: string; path: string }>> {
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("bucket", bucket)
+    if (path) formData.append("path", path)
+
+    return this.invokeFunction("media", formData, {
       headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
+        // Don't set Content-Type for FormData, let the browser set it
       },
     })
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-
-    return response.json()
   }
 
-  async signUp(email: string, password: string, userData?: any): Promise<AuthResponse> {
-    try {
-      const response = await this.makeRequest("auth", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "signup",
-          email,
-          password,
-          userData,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Signup failed",
-      }
-    }
+  async deleteMedia(bucket: string, path: string): Promise<EdgeFunctionResponse<{ message: string }>> {
+    return this.invokeFunction("media", {
+      action: "delete",
+      bucket,
+      path,
+    })
   }
 
-  async signIn(email: string, password: string): Promise<AuthResponse> {
-    try {
-      const response = await this.makeRequest("auth", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "signin",
-          email,
-          password,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Signin failed",
-      }
-    }
+  async generateAIInsight(
+    petData: any,
+    type: "health" | "behavior" | "nutrition",
+  ): Promise<EdgeFunctionResponse<{ insight: string; recommendations: string[] }>> {
+    return this.invokeFunction("ai", {
+      action: "generate-insight",
+      petData,
+      type,
+    })
   }
 
-  async resetPassword(email: string): Promise<AuthResponse> {
-    try {
-      const response = await this.makeRequest("auth", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "reset-password",
-          email,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Password reset failed",
-      }
-    }
-  }
-
-  async updatePassword(password: string, accessToken: string): Promise<AuthResponse> {
-    try {
-      const response = await this.makeRequest("auth", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          action: "update-password",
-          password,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Password update failed",
-      }
-    }
-  }
-
-  async sendMessage(recipientId: string, content: string, accessToken: string): Promise<ChatResponse> {
-    try {
-      const response = await this.makeRequest("chat", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          action: "send",
-          recipientId,
-          content,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to send message",
-      }
-    }
-  }
-
-  async getMessages(conversationId: string, accessToken: string, limit = 50): Promise<ChatResponse> {
-    try {
-      const response = await this.makeRequest("chat", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          action: "get-messages",
-          conversationId,
-          limit,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to get messages",
-      }
-    }
-  }
-
-  async markAsRead(messageId: string, accessToken: string): Promise<ChatResponse> {
-    try {
-      const response = await this.makeRequest("chat", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          action: "mark-read",
-          messageId,
-        }),
-      })
-
-      return response
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to mark message as read",
-      }
-    }
+  async analyzeHealthData(healthRecords: any[]): Promise<EdgeFunctionResponse<{ analysis: any; alerts: any[] }>> {
+    return this.invokeFunction("ai", {
+      action: "analyze-health",
+      healthRecords,
+    })
   }
 }
 
-export const authFunctions = new EdgeFunctions()
-export const chatFunctions = new EdgeFunctions()
-
-export async function getCurrentUserToken(): Promise<string | null> {
-  try {
-    const { createClient } = await import("@/lib/supabase-client")
-    const supabase = createClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    return session?.access_token || null
-  } catch (error) {
-    console.error("Failed to get user token:", error)
-    return null
-  }
-}
-
-export default EdgeFunctions
+export const edgeFunctionService = new EdgeFunctionService()
+export default edgeFunctionService
