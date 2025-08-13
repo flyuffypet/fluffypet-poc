@@ -282,5 +282,54 @@ export const mediaFunctions = {
   },
 }
 
+// Auth Functions
+export const authFunctions = {
+  async resetPassword(email: string) {
+    const supabase = createClient()
+    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    if (error) throw error
+    return { success: true }
+  },
+
+  async updateUserRole(userId: string, role: string) {
+    const supabase = createClient()
+    const { error } = await supabase.from("profiles").update({ role }).eq("id", userId)
+
+    if (error) throw error
+    return { success: true }
+  },
+}
+
+// Chat Functions
+export const chatFunctions = {
+  async sendMessage(conversationId: string, message: string, senderId: string) {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("messages")
+      .insert({
+        conversation_id: conversationId,
+        content: message,
+        sender_id: senderId,
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  },
+
+  async getMessages(conversationId: string) {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true })
+
+    if (error) throw error
+    return data
+  },
+}
+
 // Export types
 export type { EdgeFunctionResponse, MediaUploadData, ChatMessageData, AIAnalysisData }
