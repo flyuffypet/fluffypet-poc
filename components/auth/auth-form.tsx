@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { createClient } from "@/lib/supabase-client"
 import { useRouter } from "next/navigation"
+import { Loader2 } from "lucide-react"
 
 export function AuthForm() {
   const [isLoading, setIsLoading] = useState(false)
@@ -34,6 +35,7 @@ export function AuthForm() {
           data: {
             full_name: fullName,
           },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       })
 
@@ -67,6 +69,29 @@ export function AuthForm() {
         setError(error.message)
       } else {
         router.push("/dashboard")
+        router.refresh()
+      }
+    } catch (err) {
+      setError("An unexpected error occurred")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    setIsLoading(true)
+    setError("")
+
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+
+      if (error) {
+        setError(error.message)
       }
     } catch (err) {
       setError("An unexpected error occurred")
@@ -92,7 +117,14 @@ export function AuthForm() {
             <form action={handleSignIn} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="signin-email">Email</Label>
-                <Input id="signin-email" name="email" type="email" placeholder="Enter your email" required />
+                <Input
+                  id="signin-email"
+                  name="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  required
+                  disabled={isLoading}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="signin-password">Password</Label>
@@ -102,32 +134,107 @@ export function AuthForm() {
                   type="password"
                   placeholder="Enter your password"
                   required
+                  disabled={isLoading}
                 />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Signing in..." : "Sign In"}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  "Sign In"
+                )}
               </Button>
             </form>
+
+            <div className="mt-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full mt-4 bg-transparent"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Google"}
+              </Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="signup">
             <form action={handleSignUp} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="signup-name">Full Name</Label>
-                <Input id="signup-name" name="fullName" type="text" placeholder="Enter your full name" required />
+                <Input
+                  id="signup-name"
+                  name="fullName"
+                  type="text"
+                  placeholder="Enter your full name"
+                  required
+                  disabled={isLoading}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="signup-email">Email</Label>
-                <Input id="signup-email" name="email" type="email" placeholder="Enter your email" required />
+                <Input
+                  id="signup-email"
+                  name="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  required
+                  disabled={isLoading}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="signup-password">Password</Label>
-                <Input id="signup-password" name="password" type="password" placeholder="Create a password" required />
+                <Input
+                  id="signup-password"
+                  name="password"
+                  type="password"
+                  placeholder="Create a password"
+                  required
+                  disabled={isLoading}
+                  minLength={6}
+                />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Creating account..." : "Sign Up"}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  "Sign Up"
+                )}
               </Button>
             </form>
+
+            <div className="mt-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full mt-4 bg-transparent"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Google"}
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
 
