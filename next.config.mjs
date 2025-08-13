@@ -26,14 +26,6 @@ const nextConfig = {
     ],
     unoptimized: true,
   },
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      "@supabase/ssr": require.resolve("@supabase/ssr"),
-      "@supabase/supabase-js": require.resolve("@supabase/supabase-js"),
-    }
-    return config
-  },
 }
 
 export default nextConfig

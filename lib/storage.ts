@@ -1,84 +1,115 @@
 import { createClient } from "@/lib/supabase-client"
 
 export interface UploadResult {
-  url: string
-  path: string
-  error?: string
+  data: {
+    path: string
+    id: string
+    fullPath: string
+  } | null
+  error: Error | null
 }
 
-export interface StorageService {
-  uploadFile: (file: File, bucket?: string, folder?: string) => Promise<UploadResult>
-  deleteFile: (path: string, bucket?: string) => Promise<{ error?: string }>
-  getPublicUrl: (path: string, bucket?: string) => string
-  getSignedUrl: (path: string, expiresIn?: number, bucket?: string) => Promise<{ signedUrl?: string; error?: string }>
+export interface StorageFile {
+  name: string
+  id: string
+  updated_at: string
+  created_at: string
+  last_accessed_at: string
+  metadata: {
+    eTag: string
+    size: number
+    mimetype: string
+    cacheControl: string
+    lastModified: string
+    contentLength: number
+    httpStatusCode: number
+  }
 }
 
-class SupabaseStorageService implements StorageService {
+class StorageService {
   private supabase = createClient()
 
-  async uploadFile(file: File, bucket = "pet-media", folder = "general"): Promise<UploadResult> {
+  async uploadFile(
+    bucket: string,
+    path: string,
+    file: File,
+    options?: {
+      cacheControl?: string
+      contentType?: string
+      upsert?: boolean
+    },
+  ): Promise<UploadResult> {
     try {
-      // Generate unique filename
-      const fileExt = file.name.split(".").pop()
-      const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-
-      const { data, error } = await this.supabase.storage.from(bucket).upload(fileName, file, {
-        cacheControl: "3600",
-        upsert: false,
+      const { data, error } = await this.supabase.storage.from(bucket).upload(path, file, {
+        cacheControl: options?.cacheControl || "3600",
+        contentType: options?.contentType || file.type,
+        upsert: options?.upsert || false,
       })
 
       if (error) {
-        return { url: "", path: "", error: error.message }
+        throw error
       }
 
-      const { data: urlData } = this.supabase.storage.from(bucket).getPublicUrl(data.path)
-
-      return {
-        url: urlData.publicUrl,
-        path: data.path,
-      }
-    } catch (error: any) {
-      return { url: "", path: "", error: error.message }
+      return { data, error: null }
+    } catch (error) {
+      return { data: null, error: error as Error }
     }
   }
 
-  async deleteFile(path: string, bucket = "pet-media"): Promise<{ error?: string }> {
+  async deleteFile(bucket: string, path: string): Promise<{ error: Error | null }> {
     try {
       const { error } = await this.supabase.storage.from(bucket).remove([path])
 
-      if (error) {
-        return { error: error.message }
-      }
-
-      return {}
-    } catch (error: any) {
-      return { error: error.message }
+      return { error }
+    } catch (error) {
+      return { error: error as Error }
     }
   }
 
-  getPublicUrl(path: string, bucket = "pet-media"): string {
+  async getPublicUrl(bucket: string, path: string): Promise<string> {
     const { data } = this.supabase.storage.from(bucket).getPublicUrl(path)
+
     return data.publicUrl
   }
 
   async getSignedUrl(
+    bucket: string,
     path: string,
     expiresIn = 3600,
-    bucket = "pet-media",
-  ): Promise<{ signedUrl?: string; error?: string }> {
+  ): Promise<{ signedUrl: string | null; error: Error | null }> {
     try {
       const { data, error } = await this.supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
 
       if (error) {
-        return { error: error.message }
+        throw error
       }
 
-      return { signedUrl: data.signedUrl }
-    } catch (error: any) {
-      return { error: error.message }
+      return { signedUrl: data.signedUrl, error: null }
+    } catch (error) {
+      return { signedUrl: null, error: error as Error }
+    }
+  }
+
+  async listFiles(
+    bucket: string,
+    path?: string,
+  ): Promise<{
+    data: StorageFile[] | null
+    error: Error | null
+  }> {
+    try {
+      const { data, error } = await this.supabase.storage.from(bucket).list(path)
+
+      if (error) {
+        throw error
+      }
+
+      return { data, error: null }
+    } catch (error) {
+      return { data: null, error: error as Error }
     }
   }
 }
 
-export const storageService = new SupabaseStorageService()
+export const storageService = new StorageService()
 export default storageService

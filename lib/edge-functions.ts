@@ -1,11 +1,22 @@
-import { createClient } from "@/lib/supabase-client"
-
-export interface AuthFunctionResponse {
-  user?: any
+interface EdgeFunctionResponse<T = any> {
+  data?: T
   error?: string
+  status: number
 }
 
-export interface ChatMessage {
+interface AuthResponse {
+  user: {
+    id: string
+    email: string
+    role: string
+  } | null
+  session: {
+    access_token: string
+    refresh_token: string
+  } | null
+}
+
+interface ChatMessage {
   id: string
   content: string
   sender_id: string
@@ -13,89 +24,84 @@ export interface ChatMessage {
   created_at: string
 }
 
-export interface ChatFunctionResponse {
-  messages?: ChatMessage[]
-  error?: string
-}
-
 class EdgeFunctions {
-  private supabase = createClient()
+  private baseUrl: string
 
-  async getCurrentUserToken(): Promise<string | null> {
+  constructor() {
+    this.baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL + "/functions/v1"
+  }
+
+  private async makeRequest<T>(endpoint: string, options: RequestInit = {}): Promise<EdgeFunctionResponse<T>> {
     try {
-      const {
-        data: { session },
-      } = await this.supabase.auth.getSession()
-      return session?.access_token || null
+      const response = await fetch(`${this.baseUrl}/${endpoint}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+          ...options.headers,
+        },
+      })
+
+      const data = await response.json()
+
+      return {
+        data: response.ok ? data : undefined,
+        error: response.ok ? undefined : data.error || "Unknown error",
+        status: response.status,
+      }
     } catch (error) {
-      console.error("Error getting user token:", error)
-      return null
+      return {
+        error: error instanceof Error ? error.message : "Network error",
+        status: 500,
+      }
     }
   }
 
-  async callAuthFunction(functionName: string, payload: any = {}): Promise<AuthFunctionResponse> {
-    try {
-      const token = await this.getCurrentUserToken()
-      if (!token) {
-        return { error: "No authentication token available" }
-      }
-
-      const { data, error } = await this.supabase.functions.invoke(functionName, {
-        body: payload,
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { user: data }
-    } catch (error: any) {
-      return { error: error.message }
-    }
+  async getCurrentUser(token: string): Promise<EdgeFunctionResponse<AuthResponse>> {
+    return this.makeRequest<AuthResponse>("auth", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
   }
 
-  async callChatFunction(functionName: string, payload: any = {}): Promise<ChatFunctionResponse> {
-    try {
-      const token = await this.getCurrentUserToken()
-      if (!token) {
-        return { error: "No authentication token available" }
-      }
+  async sendMessage(content: string, recipientId: string, token: string): Promise<EdgeFunctionResponse<ChatMessage>> {
+    return this.makeRequest<ChatMessage>("chat", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        content,
+        recipient_id: recipientId,
+      }),
+    })
+  }
 
-      const { data, error } = await this.supabase.functions.invoke(functionName, {
-        body: payload,
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { messages: data }
-    } catch (error: any) {
-      return { error: error.message }
-    }
+  async getMessages(conversationId: string, token: string): Promise<EdgeFunctionResponse<ChatMessage[]>> {
+    return this.makeRequest<ChatMessage[]>(`chat/${conversationId}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
   }
 }
-
-const edgeFunctions = new EdgeFunctions()
 
 export const authFunctions = {
-  signUp: (payload: { email: string; password: string }) => edgeFunctions.callAuthFunction("auth", payload),
-  signIn: (payload: { email: string; password: string }) => edgeFunctions.callAuthFunction("auth", payload),
-  signOut: () => edgeFunctions.callAuthFunction("auth", { action: "signout" }),
-  resetPassword: (payload: { email: string }) => edgeFunctions.callAuthFunction("auth", payload),
+  getCurrentUser: (token: string) => new EdgeFunctions().getCurrentUser(token),
 }
 
 export const chatFunctions = {
-  sendMessage: (payload: { recipient_id: string; content: string }) => edgeFunctions.callChatFunction("chat", payload),
-  getMessages: (payload: { conversation_id: string }) => edgeFunctions.callChatFunction("chat", payload),
+  sendMessage: (content: string, recipientId: string, token: string) =>
+    new EdgeFunctions().sendMessage(content, recipientId, token),
+  getMessages: (conversationId: string, token: string) => new EdgeFunctions().getMessages(conversationId, token),
 }
 
-export const getCurrentUserToken = () => edgeFunctions.getCurrentUserToken()
+export const getCurrentUserToken = (): string | null => {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem("supabase.auth.token")
+}
 
-export default edgeFunctions
+export default new EdgeFunctions()
