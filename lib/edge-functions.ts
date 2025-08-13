@@ -108,6 +108,24 @@ class EdgeFunctionService {
     })
   }
 
+  async createConversation(
+    otherUserId: string,
+    accessToken: string,
+  ): Promise<EdgeFunctionResponse<{ conversationId: string }>> {
+    return this.invokeFunction(
+      "chat",
+      {
+        action: "create-conversation",
+        otherUserId,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    )
+  }
+
   async uploadMedia(
     file: File,
     bucket: string,
@@ -153,4 +171,23 @@ class EdgeFunctionService {
 }
 
 export const edgeFunctionService = new EdgeFunctionService()
+
+// Export individual services for backward compatibility
+export const authFunctions = edgeFunctionService
+export const chatFunctions = edgeFunctionService
+
+export async function getCurrentUserToken(): Promise<string | null> {
+  try {
+    const { createClient } = await import("@/lib/supabase-client")
+    const supabase = createClient()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    return session?.access_token || null
+  } catch (error) {
+    console.error("Failed to get user token:", error)
+    return null
+  }
+}
+
 export default edgeFunctionService

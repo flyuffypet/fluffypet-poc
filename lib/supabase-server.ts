@@ -31,9 +31,3 @@ export const createServerClient = cache(() => {
     },
   })
 })
-
-export const getSupabaseServerClient = createServerClient
-
-export const createClient = createServerClient
-
-export default createServerClient

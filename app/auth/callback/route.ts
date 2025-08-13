@@ -2,41 +2,29 @@ import { createServerClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
 
 export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url)
-  const code = requestUrl.searchParams.get("code")
-  const next = requestUrl.searchParams.get("next") ?? "/dashboard"
+  const { searchParams, origin } = new URL(request.url)
+  const code = searchParams.get("code")
+  const next = searchParams.get("next") ?? "/"
+  const redirect = searchParams.get("redirect") ?? "/"
 
   if (code) {
     const supabase = createServerClient()
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
 
-    try {
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-
-      if (error) {
-        console.error("Auth callback error:", error)
-        return NextResponse.redirect(`${requestUrl.origin}/login?error=auth_callback_error`)
+    if (!error) {
+      const forwardedHost = request.headers.get("x-forwarded-host") // original origin before load balancer
+      const isLocalEnv = process.env.NODE_ENV === "development"
+      if (isLocalEnv) {
+        // we can be sure that there is no load balancer in between, so no need to watch for X-Forwarded-Host
+        return NextResponse.redirect(`${origin}${next}`)
+      } else if (forwardedHost) {
+        return NextResponse.redirect(`https://${forwardedHost}${next}`)
+      } else {
+        return NextResponse.redirect(`${origin}${next}`)
       }
-
-      if (data.user) {
-        // Check if user has completed onboarding
-        const { data: profile } = await supabase
-          .from("users")
-          .select("role, onboarding_completed")
-          .eq("id", data.user.id)
-          .single()
-
-        if (profile?.onboarding_completed) {
-          return NextResponse.redirect(`${requestUrl.origin}${next}`)
-        } else {
-          return NextResponse.redirect(`${requestUrl.origin}/onboarding`)
-        }
-      }
-    } catch (error) {
-      console.error("Auth callback error:", error)
-      return NextResponse.redirect(`${requestUrl.origin}/login?error=auth_callback_error`)
     }
   }
 
-  // If no code or error, redirect to login
-  return NextResponse.redirect(`${requestUrl.origin}/login`)
+  // return the user to an error page with instructions
+  return NextResponse.redirect(`${origin}/auth/auth-code-error`)
 }
