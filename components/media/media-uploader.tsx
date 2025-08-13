@@ -5,181 +5,114 @@ import { useDropzone } from "react-dropzone"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Upload, X, File, ImageIcon } from "lucide-react"
+import { X, Upload, File, ImageIcon, Video } from "lucide-react"
 import { storageService } from "@/lib/storage"
-import { createClient } from "@/lib/supabase-client"
 
-interface MediaFile {
+interface UploadedFile {
   id: string
-  file: File
-  preview?: string
-  progress: number
-  uploaded: boolean
-  error?: string
-  path?: string
-  url?: string
+  name: string
+  url: string
+  path: string
+  type: string
+  size: number
 }
 
 interface MediaUploaderProps {
-  petId: string
-  mediaType?: "photos" | "documents" | "medical"
+  onUpload?: (files: UploadedFile[]) => void
   maxFiles?: number
-  maxSize?: number
   acceptedTypes?: string[]
-  onUploadComplete?: (files: { path: string; url: string; type: string }[]) => void
-  onUploadError?: (error: string) => void
+  bucket?: string
+  folder?: string
 }
 
 export function MediaUploader({
-  petId,
-  mediaType = "photos",
+  onUpload,
   maxFiles = 10,
-  maxSize = 10 * 1024 * 1024, // 10MB
-  acceptedTypes = ["image/*", "application/pdf", ".doc", ".docx"],
-  onUploadComplete,
-  onUploadError,
+  acceptedTypes = ["image/*", "video/*", "application/pdf"],
+  bucket = "pet-media",
+  folder = "uploads",
 }: MediaUploaderProps) {
-  const [files, setFiles] = useState<MediaFile[]>([])
-  const [isUploading, setIsUploading] = useState(false)
-  const [error, setError] = useState<string>("")
-  const supabase = createClient()
+  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
 
   const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      setError("")
-
+    async (acceptedFiles: File[]) => {
       if (files.length + acceptedFiles.length > maxFiles) {
-        setError(`Maximum ${maxFiles} files allowed`)
+        alert(`Maximum ${maxFiles} files allowed`)
         return
       }
 
-      const newFiles: MediaFile[] = acceptedFiles.map((file) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        file,
-        preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-        progress: 0,
-        uploaded: false,
-      }))
+      setUploading(true)
+      setUploadProgress(0)
 
-      setFiles((prev) => [...prev, ...newFiles])
-    },
-    [files.length, maxFiles],
-  )
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: acceptedTypes.reduce(
-      (acc, type) => {
-        acc[type] = []
-        return acc
-      },
-      {} as Record<string, string[]>,
-    ),
-    maxSize,
-    disabled: isUploading,
-  })
-
-  const removeFile = (id: string) => {
-    setFiles((prev) => {
-      const file = prev.find((f) => f.id === id)
-      if (file?.preview) {
-        URL.revokeObjectURL(file.preview)
-      }
-      return prev.filter((f) => f.id !== id)
-    })
-  }
-
-  const uploadFiles = async () => {
-    if (files.length === 0) return
-
-    setIsUploading(true)
-    setError("")
-
-    const uploadPromises = files
-      .filter((f) => !f.uploaded)
-      .map(async (mediaFile) => {
+      const uploadPromises = acceptedFiles.map(async (file, index) => {
         try {
-          // Update progress
-          setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, progress: 10 } : f)))
-
-          // Generate unique path
-          const path = storageService.generatePath(petId, mediaFile.file.name, mediaType)
-
-          // Upload to Supabase Storage
-          const result = await storageService.uploadFile(mediaFile.file, path)
+          const result = await storageService.uploadFile(file, bucket, folder)
 
           if (result.error) {
             throw new Error(result.error)
           }
 
+          const uploadedFile: UploadedFile = {
+            id: Math.random().toString(36).substring(2),
+            name: file.name,
+            url: result.url,
+            path: result.path,
+            type: file.type,
+            size: file.size,
+          }
+
           // Update progress
-          setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, progress: 70 } : f)))
+          setUploadProgress(((index + 1) / acceptedFiles.length) * 100)
 
-          // Save media record to database
-          const { error: dbError } = await supabase.from("pet_media").insert({
-            pet_id: petId,
-            type: mediaType,
-            filename: mediaFile.file.name,
-            path: result.path,
-            url: result.url,
-            file_size: mediaFile.file.size,
-            mime_type: mediaFile.file.type,
-          })
-
-          if (dbError) {
-            throw new Error(dbError.message)
-          }
-
-          // Update progress to complete
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === mediaFile.id
-                ? {
-                    ...f,
-                    progress: 100,
-                    uploaded: true,
-                    path: result.path,
-                    url: result.url,
-                  }
-                : f,
-            ),
-          )
-
-          return {
-            path: result.path,
-            url: result.url,
-            type: mediaFile.file.type,
-          }
+          return uploadedFile
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Upload failed"
-
-          setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, error: errorMessage, progress: 0 } : f)))
-
-          throw error
+          console.error("Upload failed:", error)
+          return null
         }
       })
 
+      const uploadedFiles = (await Promise.all(uploadPromises)).filter(Boolean) as UploadedFile[]
+
+      setFiles((prev) => [...prev, ...uploadedFiles])
+      setUploading(false)
+      setUploadProgress(0)
+
+      if (onUpload) {
+        onUpload(uploadedFiles)
+      }
+    },
+    [files.length, maxFiles, bucket, folder, onUpload],
+  )
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: acceptedTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {}),
+    maxFiles: maxFiles - files.length,
+  })
+
+  const removeFile = async (fileToRemove: UploadedFile) => {
     try {
-      const results = await Promise.all(uploadPromises)
-      onUploadComplete?.(results)
+      await storageService.deleteFile(fileToRemove.path, bucket)
+      setFiles((prev) => prev.filter((file) => file.id !== fileToRemove.id))
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Some uploads failed"
-      setError(errorMessage)
-      onUploadError?.(errorMessage)
-    } finally {
-      setIsUploading(false)
+      console.error("Failed to delete file:", error)
     }
   }
 
-  const clearAll = () => {
-    files.forEach((file) => {
-      if (file.preview) {
-        URL.revokeObjectURL(file.preview)
-      }
-    })
-    setFiles([])
-    setError("")
+  const getFileIcon = (type: string) => {
+    if (type.startsWith("image/")) return <ImageIcon className="h-4 w-4" />
+    if (type.startsWith("video/")) return <Video className="h-4 w-4" />
+    return <File className="h-4 w-4" />
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes"
+    const k = 1024
+    const sizes = ["Bytes", "KB", "MB", "GB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
   return (
@@ -190,77 +123,49 @@ export function MediaUploader({
             {...getRootProps()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
               isDragActive ? "border-primary bg-primary/5" : "border-gray-300 hover:border-gray-400"
-            } ${isUploading ? "pointer-events-none opacity-50" : ""}`}
+            }`}
           >
             <input {...getInputProps()} />
             <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-            <p className="text-lg font-medium text-gray-900 mb-2">
-              {isDragActive ? "Drop files here" : "Drag & drop files here"}
-            </p>
-            <p className="text-sm text-gray-500 mb-4">or click to select files</p>
-            <p className="text-xs text-gray-400">
-              Max {maxFiles} files, {Math.round(maxSize / 1024 / 1024)}MB each
-            </p>
+            {isDragActive ? (
+              <p className="text-lg">Drop the files here...</p>
+            ) : (
+              <div>
+                <p className="text-lg mb-2">Drag & drop files here, or click to select</p>
+                <p className="text-sm text-gray-500">
+                  Maximum {maxFiles} files. Accepted: {acceptedTypes.join(", ")}
+                </p>
+              </div>
+            )}
           </div>
+
+          {uploading && (
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Uploading...</span>
+                <span className="text-sm text-gray-500">{Math.round(uploadProgress)}%</span>
+              </div>
+              <Progress value={uploadProgress} className="w-full" />
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       {files.length > 0 && (
         <Card>
-          <CardContent className="p-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-medium">Files ({files.length})</h3>
-              <div className="space-x-2">
-                <Button variant="outline" size="sm" onClick={clearAll} disabled={isUploading}>
-                  Clear All
-                </Button>
-                <Button onClick={uploadFiles} disabled={isUploading || files.every((f) => f.uploaded)} size="sm">
-                  {isUploading ? "Uploading..." : "Upload Files"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
+          <CardContent className="p-6">
+            <h3 className="font-medium mb-4">Uploaded Files ({files.length})</h3>
+            <div className="space-y-2">
               {files.map((file) => (
-                <div key={file.id} className="flex items-center space-x-3 p-3 border rounded-lg">
-                  <div className="flex-shrink-0">
-                    {file.preview ? (
-                      <img
-                        src={file.preview || "/placeholder.svg"}
-                        alt={file.file.name}
-                        className="h-10 w-10 object-cover rounded"
-                      />
-                    ) : (
-                      <div className="h-10 w-10 bg-gray-100 rounded flex items-center justify-center">
-                        {file.file.type.startsWith("image/") ? (
-                          <ImageIcon className="h-5 w-5 text-gray-400" />
-                        ) : (
-                          <File className="h-5 w-5 text-gray-400" />
-                        )}
-                      </div>
-                    )}
+                <div key={file.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    {getFileIcon(file.type)}
+                    <div>
+                      <p className="font-medium text-sm">{file.name}</p>
+                      <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                    </div>
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{file.file.name}</p>
-                    <p className="text-xs text-gray-500">{(file.file.size / 1024 / 1024).toFixed(2)} MB</p>
-
-                    {file.progress > 0 && !file.uploaded && !file.error && (
-                      <Progress value={file.progress} className="mt-2" />
-                    )}
-
-                    {file.error && <p className="text-xs text-red-500 mt-1">{file.error}</p>}
-
-                    {file.uploaded && <p className="text-xs text-green-500 mt-1">Uploaded successfully</p>}
-                  </div>
-
-                  <Button variant="ghost" size="sm" onClick={() => removeFile(file.id)} disabled={isUploading}>
+                  <Button variant="ghost" size="sm" onClick={() => removeFile(file)}>
                     <X className="h-4 w-4" />
                   </Button>
                 </div>

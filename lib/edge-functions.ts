@@ -1,32 +1,49 @@
-import { createClient } from "./supabase-client"
+import { createClient } from "@/lib/supabase-client"
 
-class AuthFunctions {
+export interface AuthFunctionResponse {
+  user?: any
+  error?: string
+}
+
+export interface ChatMessage {
+  id: string
+  content: string
+  sender_id: string
+  recipient_id: string
+  created_at: string
+}
+
+export interface ChatFunctionResponse {
+  messages?: ChatMessage[]
+  error?: string
+}
+
+class EdgeFunctions {
   private supabase = createClient()
 
-  async signIn(email: string, password: string) {
+  async getCurrentUserToken(): Promise<string | null> {
     try {
-      const { data, error } = await this.supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { data, error: null }
+      const {
+        data: { session },
+      } = await this.supabase.auth.getSession()
+      return session?.access_token || null
     } catch (error) {
-      return { error: "An unexpected error occurred" }
+      console.error("Error getting user token:", error)
+      return null
     }
   }
 
-  async signUp(email: string, password: string, metadata?: Record<string, any>) {
+  async callAuthFunction(functionName: string, payload: any = {}): Promise<AuthFunctionResponse> {
     try {
-      const { data, error } = await this.supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: metadata,
+      const token = await this.getCurrentUserToken()
+      if (!token) {
+        return { error: "No authentication token available" }
+      }
+
+      const { data, error } = await this.supabase.functions.invoke(functionName, {
+        body: payload,
+        headers: {
+          Authorization: `Bearer ${token}`,
         },
       })
 
@@ -34,134 +51,51 @@ class AuthFunctions {
         return { error: error.message }
       }
 
-      return { data, error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
+      return { user: data }
+    } catch (error: any) {
+      return { error: error.message }
     }
   }
 
-  async updatePassword(password: string, accessToken?: string) {
+  async callChatFunction(functionName: string, payload: any = {}): Promise<ChatFunctionResponse> {
     try {
-      const { data, error } = await this.supabase.auth.updateUser({
-        password,
+      const token = await this.getCurrentUserToken()
+      if (!token) {
+        return { error: "No authentication token available" }
+      }
+
+      const { data, error } = await this.supabase.functions.invoke(functionName, {
+        body: payload,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       })
 
       if (error) {
         return { error: error.message }
       }
 
-      return { data, error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
-    }
-  }
-
-  async resetPassword(email: string) {
-    try {
-      const { error } = await this.supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      })
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
-    }
-  }
-
-  async signOut() {
-    try {
-      const { error } = await this.supabase.auth.signOut()
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
+      return { messages: data }
+    } catch (error: any) {
+      return { error: error.message }
     }
   }
 }
 
-class ChatFunctions {
-  private supabase = createClient()
+const edgeFunctions = new EdgeFunctions()
 
-  async sendMessage(conversationId: string, content: string, senderId: string) {
-    try {
-      const { data, error } = await this.supabase
-        .from("messages")
-        .insert({
-          conversation_id: conversationId,
-          content,
-          sender_id: senderId,
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .single()
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { data, error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
-    }
-  }
-
-  async getMessages(conversationId: string, limit = 50) {
-    try {
-      const { data, error } = await this.supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true })
-        .limit(limit)
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { data, error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
-    }
-  }
-
-  async createConversation(participants: string[], type = "direct") {
-    try {
-      const { data, error } = await this.supabase
-        .from("conversations")
-        .insert({
-          type,
-          participants,
-          created_at: new Date().toISOString(),
-        })
-        .select()
-        .single()
-
-      if (error) {
-        return { error: error.message }
-      }
-
-      return { data, error: null }
-    } catch (error) {
-      return { error: "An unexpected error occurred" }
-    }
-  }
+export const authFunctions = {
+  signUp: (payload: { email: string; password: string }) => edgeFunctions.callAuthFunction("auth", payload),
+  signIn: (payload: { email: string; password: string }) => edgeFunctions.callAuthFunction("auth", payload),
+  signOut: () => edgeFunctions.callAuthFunction("auth", { action: "signout" }),
+  resetPassword: (payload: { email: string }) => edgeFunctions.callAuthFunction("auth", payload),
 }
 
-export const authFunctions = new AuthFunctions()
-export const chatFunctions = new ChatFunctions()
-
-export async function getCurrentUserToken() {
-  const supabase = createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  return session?.access_token || null
+export const chatFunctions = {
+  sendMessage: (payload: { recipient_id: string; content: string }) => edgeFunctions.callChatFunction("chat", payload),
+  getMessages: (payload: { conversation_id: string }) => edgeFunctions.callChatFunction("chat", payload),
 }
+
+export const getCurrentUserToken = () => edgeFunctions.getCurrentUserToken()
+
+export default edgeFunctions
