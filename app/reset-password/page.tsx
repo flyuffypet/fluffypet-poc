@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import { ResetPasswordClientPage } from "./reset-password-client-page"
+import ResetPasswordClientPage from "./reset-password-client-page"
 
 export const metadata = {
   title: "Reset Password - FluffyPet",
@@ -8,10 +8,14 @@ export const metadata = {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
-      <Suspense fallback={<div>Loading...</div>}>
-        <ResetPasswordClientPage />
-      </Suspense>
-    </div>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      }
+    >
+      <ResetPasswordClientPage />
+    </Suspense>
   )
 }

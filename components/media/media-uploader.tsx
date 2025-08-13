@@ -5,7 +5,6 @@ import { useDropzone } from "react-dropzone"
 import { Upload, X, File, ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { storageService, type UploadOptions } from "@/lib/storage"
 import { cn } from "@/lib/utils"
 
 interface MediaFile {
@@ -19,17 +18,20 @@ interface MediaFile {
 }
 
 interface MediaUploaderProps {
+  petId?: string
   onUpload?: (files: { url: string; path: string }[]) => void
+  onUploaded?: () => void
   onError?: (error: string) => void
   maxFiles?: number
   maxSize?: number
   accept?: Record<string, string[]>
   className?: string
-  uploadOptions?: UploadOptions
 }
 
-export function MediaUploader({
+export default function MediaUploader({
+  petId,
   onUpload,
+  onUploaded,
   onError,
   maxFiles = 5,
   maxSize = 10 * 1024 * 1024, // 10MB
@@ -38,7 +40,6 @@ export function MediaUploader({
     "application/pdf": [".pdf"],
   },
   className,
-  uploadOptions = {},
 }: MediaUploaderProps) {
   const [files, setFiles] = useState<MediaFile[]>([])
   const [uploading, setUploading] = useState(false)
@@ -88,27 +89,27 @@ export function MediaUploader({
       for (const mediaFile of files) {
         if (mediaFile.uploaded) continue
 
-        // Update progress
+        // Simulate upload progress
         setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, progress: 10 } : f)))
 
-        const result = await storageService.uploadFile(mediaFile.file, {
-          ...uploadOptions,
-          maxSize,
-        })
+        // Simulate API call
+        await new Promise((resolve) => setTimeout(resolve, 1000))
 
-        if (result.error) {
-          setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, error: result.error, progress: 0 } : f)))
-          onError?.(result.error)
-        } else {
-          setFiles((prev) =>
-            prev.map((f) => (f.id === mediaFile.id ? { ...f, uploaded: true, progress: 100, url: result.url } : f)),
-          )
-          uploadedFiles.push({ url: result.url, path: result.path })
-        }
+        setFiles((prev) => prev.map((f) => (f.id === mediaFile.id ? { ...f, progress: 50 } : f)))
+
+        // Simulate completion
+        const mockUrl = URL.createObjectURL(mediaFile.file)
+        const mockPath = `pets/${petId || "default"}/${mediaFile.file.name}`
+
+        setFiles((prev) =>
+          prev.map((f) => (f.id === mediaFile.id ? { ...f, uploaded: true, progress: 100, url: mockUrl } : f)),
+        )
+        uploadedFiles.push({ url: mockUrl, path: mockPath })
       }
 
       if (uploadedFiles.length > 0) {
         onUpload?.(uploadedFiles)
+        onUploaded?.()
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed"

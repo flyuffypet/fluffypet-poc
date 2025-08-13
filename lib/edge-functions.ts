@@ -1,144 +1,94 @@
-import { createClient } from "@/lib/supabase-client"
+"use client"
 
-export interface EdgeFunctionResponse<T = any> {
+interface EdgeFunctionResponse<T = any> {
   data?: T
   error?: string
-  success: boolean
 }
 
-export class EdgeFunctionsService {
-  private supabase = createClient()
+class EdgeFunctionsService {
+  private baseUrl = "/api"
 
-  async invokeFunction<T = any>(functionName: string, payload?: any): Promise<EdgeFunctionResponse<T>> {
+  async callFunction<T = any>(
+    functionName: string,
+    payload?: any,
+    options?: RequestInit,
+  ): Promise<EdgeFunctionResponse<T>> {
     try {
-      const { data, error } = await this.supabase.functions.invoke(functionName, {
-        body: payload,
+      const response = await fetch(`${this.baseUrl}/${functionName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+        },
+        body: payload ? JSON.stringify(payload) : undefined,
+        ...options,
       })
 
-      if (error) {
-        console.error(`Edge function ${functionName} error:`, error)
-        return {
-          success: false,
-          error: error.message,
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      return {
-        success: true,
-        data,
-      }
+      const data = await response.json()
+      return { data }
     } catch (error) {
-      console.error(`Edge function ${functionName} exception:`, error)
       return {
-        success: false,
         error: error instanceof Error ? error.message : "Function call failed",
       }
     }
   }
 
   // Auth functions
-  async sendWelcomeEmail(userId: string, email: string) {
-    return this.invokeFunction("auth", {
-      action: "send_welcome_email",
-      userId,
-      email,
-    })
+  async signUp(email: string, password: string) {
+    return this.callFunction("auth/signup", { email, password })
   }
 
-  async sendPasswordResetEmail(email: string) {
-    return this.invokeFunction("auth", {
-      action: "send_password_reset",
-      email,
-    })
+  async signIn(email: string, password: string) {
+    return this.callFunction("auth/signin", { email, password })
   }
 
-  // Media functions
-  async processImage(imageUrl: string, transformations: any) {
-    return this.invokeFunction("media", {
-      action: "process_image",
-      imageUrl,
-      transformations,
-    })
-  }
-
-  async generateThumbnail(imageUrl: string, size = 200) {
-    return this.invokeFunction("media", {
-      action: "generate_thumbnail",
-      imageUrl,
-      size,
-    })
+  async resetPassword(email: string) {
+    return this.callFunction("auth/reset-password", { email })
   }
 
   // Chat functions
-  async sendMessage(conversationId: string, message: any) {
-    return this.invokeFunction("chat", {
-      action: "send_message",
-      conversationId,
-      message,
-    })
+  async sendMessage(conversationId: string, message: string) {
+    return this.callFunction("chat/send", { conversationId, message })
   }
 
-  async createConversation(participants: string[]) {
-    return this.invokeFunction("chat", {
-      action: "create_conversation",
-      participants,
-    })
+  async getMessages(conversationId: string) {
+    return this.callFunction("chat/messages", { conversationId })
   }
 
   // AI functions
-  async analyzePetHealth(petData: any, symptoms?: string[]) {
-    return this.invokeFunction("ai", {
-      action: "analyze_pet_health",
-      petData,
-      symptoms,
-    })
+  async analyzeHealthData(petData: any) {
+    return this.callFunction("ai/health-analysis", { petData })
   }
 
-  async generateHealthInsights(petId: string) {
-    return this.invokeFunction("ai", {
-      action: "generate_health_insights",
-      petId,
-    })
+  async generateInsights(petId: string) {
+    return this.callFunction("ai/insights", { petId })
   }
 
-  async chatWithAI(message: string, context?: any) {
-    return this.invokeFunction("ai", {
-      action: "chat",
-      message,
-      context,
-    })
+  // Media functions
+  async processMedia(fileUrl: string, type: string) {
+    return this.callFunction("media/process", { fileUrl, type })
   }
 }
 
 export const edgeFunctions = new EdgeFunctionsService()
 
-// Specific function helpers
-export const authFunctions = {
-  sendWelcomeEmail: (userId: string, email: string) => edgeFunctions.sendWelcomeEmail(userId, email),
-  sendPasswordResetEmail: (email: string) => edgeFunctions.sendPasswordResetEmail(email),
-}
-
-export const mediaFunctions = {
-  processImage: (imageUrl: string, transformations: any) => edgeFunctions.processImage(imageUrl, transformations),
-  generateThumbnail: (imageUrl: string, size?: number) => edgeFunctions.generateThumbnail(imageUrl, size),
-}
-
+// Export individual functions for convenience
 export const chatFunctions = {
-  sendMessage: (conversationId: string, message: any) => edgeFunctions.sendMessage(conversationId, message),
-  createConversation: (participants: string[]) => edgeFunctions.createConversation(participants),
+  sendMessage: edgeFunctions.sendMessage.bind(edgeFunctions),
+  getMessages: edgeFunctions.getMessages.bind(edgeFunctions),
+}
+
+export const authFunctions = {
+  signUp: edgeFunctions.signUp.bind(edgeFunctions),
+  signIn: edgeFunctions.signIn.bind(edgeFunctions),
+  resetPassword: edgeFunctions.resetPassword.bind(edgeFunctions),
 }
 
 export const aiFunctions = {
-  analyzePetHealth: (petData: any, symptoms?: string[]) => edgeFunctions.analyzePetHealth(petData, symptoms),
-  generateHealthInsights: (petId: string) => edgeFunctions.generateHealthInsights(petId),
-  chatWithAI: (message: string, context?: any) => edgeFunctions.chatWithAI(message, context),
-}
-
-// Helper to get current user token for authenticated requests
-export async function getCurrentUserToken(): Promise<string | null> {
-  const supabase = createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  return session?.access_token || null
+  analyzeHealthData: edgeFunctions.analyzeHealthData.bind(edgeFunctions),
+  generateInsights: edgeFunctions.generateInsights.bind(edgeFunctions),
 }

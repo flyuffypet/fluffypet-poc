@@ -1,7 +1,6 @@
-import type { Metadata } from "next"
-import { AuthForm } from "@/components/auth/auth-form"
+import AuthForm from "@/components/auth/auth-form"
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Sign In - FluffyPet",
   description: "Sign in to your FluffyPet account",
 }
