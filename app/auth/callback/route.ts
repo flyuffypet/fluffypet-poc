@@ -1,64 +1,42 @@
-import { createClient } from "@supabase/supabase-js"
-import { NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { createServerClient } from "@/lib/supabase-server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function GET(request: Request) {
-  const requestUrl = new URL(request.url)
-  const code = requestUrl.searchParams.get("code")
-  const next = requestUrl.searchParams.get("next") || "/dashboard"
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = new URL(request.url)
+  const code = searchParams.get("code")
+  const next = searchParams.get("redirect") || "/dashboard"
 
   if (code) {
-    const cookieStore = cookies()
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: any) {
-          cookieStore.set({ name, value: "", ...options })
-        },
-      },
-    })
+    const supabase = createServerClient()
 
     try {
-      const { error } = await supabase.auth.exchangeCodeForSession(code)
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
       if (error) {
-        console.error("Error exchanging code for session:", error)
-        return NextResponse.redirect(`${requestUrl.origin}/login?error=Authentication failed: ${error.message}`)
+        console.error("Auth callback error:", error)
+        return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`)
       }
 
-      // Check if user needs onboarding
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user) {
+      if (data.user) {
         // Check if user has completed onboarding
         const { data: profile } = await supabase
           .from("profiles")
-          .select("onboarding_completed")
-          .eq("id", user.id)
+          .select("role, onboarding_completed")
+          .eq("id", data.user.id)
           .single()
 
-        if (!profile || !profile.onboarding_completed) {
-          return NextResponse.redirect(`${requestUrl.origin}/onboarding`)
+        if (!profile?.role || !profile?.onboarding_completed) {
+          return NextResponse.redirect(`${origin}/onboarding`)
         }
       }
 
-      return NextResponse.redirect(`${requestUrl.origin}${next}`)
+      return NextResponse.redirect(`${origin}${next}`)
     } catch (error) {
-      console.error("Unexpected error during auth callback:", error)
-      return NextResponse.redirect(`${requestUrl.origin}/login?error=Unexpected authentication error`)
+      console.error("Auth callback error:", error)
+      return NextResponse.redirect(`${origin}/login?error=Authentication failed`)
     }
   }
 
-  // If no code is present, redirect to login
-  return NextResponse.redirect(`${requestUrl.origin}/login?error=No authentication code provided`)
+  // Return the user to an error page with instructions
+  return NextResponse.redirect(`${origin}/login?error=No authorization code provided`)
 }

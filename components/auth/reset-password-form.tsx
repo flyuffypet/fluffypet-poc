@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -10,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { createClient } from "@/lib/supabase-client"
-import { Mail, Lock, Eye, EyeOff } from "lucide-react"
+import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react"
 
 export default function ResetPasswordForm() {
   const [isLoading, setIsLoading] = useState(false)
@@ -32,8 +31,9 @@ export default function ResetPasswordForm() {
     // Check if we have access_token and refresh_token in URL (from email link)
     const accessToken = searchParams.get("access_token")
     const refreshToken = searchParams.get("refresh_token")
+    const type = searchParams.get("type")
 
-    if (accessToken && refreshToken) {
+    if (accessToken && refreshToken && type === "recovery") {
       setMode("reset")
       // Set the session from the tokens
       supabase.auth.setSession({
@@ -47,6 +47,7 @@ export default function ResetPasswordForm() {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
     setError(null)
+    setSuccess(null)
   }
 
   const handleRequestReset = async (e: React.FormEvent) => {
@@ -54,6 +55,12 @@ export default function ResetPasswordForm() {
 
     if (!formData.email) {
       setError("Please enter your email address")
+      return
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(formData.email)) {
+      setError("Please enter a valid email address")
       return
     }
 
@@ -68,8 +75,9 @@ export default function ResetPasswordForm() {
 
       if (error) throw error
 
-      setSuccess("Password reset link has been sent to your email")
+      setSuccess("Password reset link has been sent to your email. Please check your inbox and spam folder.")
     } catch (error: any) {
+      console.error("Reset password error:", error)
       setError(error.message || "An error occurred while sending reset email")
     } finally {
       setIsLoading(false)
@@ -105,12 +113,13 @@ export default function ResetPasswordForm() {
 
       if (error) throw error
 
-      setSuccess("Password updated successfully! Redirecting...")
+      setSuccess("Password updated successfully! Redirecting to login...")
 
       setTimeout(() => {
         router.push("/login")
       }, 2000)
     } catch (error: any) {
+      console.error("Update password error:", error)
       setError(error.message || "An error occurred while updating password")
     } finally {
       setIsLoading(false)
@@ -118,12 +127,12 @@ export default function ResetPasswordForm() {
   }
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl font-bold text-center">
+    <Card className="w-full max-w-md mx-auto shadow-lg">
+      <CardHeader className="space-y-1 text-center">
+        <CardTitle className="text-2xl font-bold">
           {mode === "request" ? "Reset Password" : "Set New Password"}
         </CardTitle>
-        <CardDescription className="text-center">
+        <CardDescription>
           {mode === "request"
             ? "Enter your email address and we'll send you a reset link"
             : "Enter your new password below"}
@@ -157,12 +166,20 @@ export default function ResetPasswordForm() {
                   onChange={handleInputChange}
                   className="pl-10"
                   required
+                  disabled={isLoading}
                 />
               </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Sending..." : "Send Reset Link"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                "Send Reset Link"
+              )}
             </Button>
           </form>
         ) : (
@@ -180,6 +197,7 @@ export default function ResetPasswordForm() {
                   onChange={handleInputChange}
                   className="pl-10 pr-10"
                   required
+                  disabled={isLoading}
                 />
                 <Button
                   type="button"
@@ -187,6 +205,7 @@ export default function ResetPasswordForm() {
                   size="sm"
                   className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                   onClick={() => setShowPassword(!showPassword)}
+                  disabled={isLoading}
                 >
                   {showPassword ? (
                     <EyeOff className="h-4 w-4 text-gray-400" />
@@ -210,12 +229,20 @@ export default function ResetPasswordForm() {
                   onChange={handleInputChange}
                   className="pl-10"
                   required
+                  disabled={isLoading}
                 />
               </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Updating..." : "Update Password"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Password"
+              )}
             </Button>
           </form>
         )}

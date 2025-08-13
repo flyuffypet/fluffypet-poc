@@ -5,9 +5,43 @@ import { Suspense } from "react"
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase-client"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Logo } from "@/components/ui/logo"
-import { ResetPasswordForm } from "@/components/auth/reset-password-form"
+import ResetPasswordForm from "@/components/auth/reset-password-form"
+
+function ResetPasswordContent({ password, confirmPassword, loading, error, success, handleSubmit }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-100 p-4">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <Logo className="mx-auto h-12 w-auto mb-4" />
+          {success ? (
+            <>
+              <h1 className="text-3xl font-bold text-gray-900">Password Updated!</h1>
+              <p className="text-gray-600 mt-2">
+                Your password has been successfully updated. Redirecting to dashboard...
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-3xl font-bold text-gray-900">Reset Password</h1>
+              <p className="text-gray-600 mt-2">We'll help you get back into your account</p>
+            </>
+          )}
+        </div>
+
+        {!success && (
+          <ResetPasswordForm
+            password={password}
+            confirmPassword={confirmPassword}
+            loading={loading}
+            error={error}
+            handleSubmit={handleSubmit}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("")
@@ -57,52 +91,22 @@ export default function ResetPasswordPage() {
     }
   }
 
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full space-y-8">
-          <div className="text-center">
-            <Logo className="mx-auto h-12 w-auto" />
-            <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Password Updated!</h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Your password has been successfully updated. Redirecting to dashboard...
-            </p>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-center text-green-600">Password Updated!</CardTitle>
-              <CardDescription className="text-center">
-                Your password has been successfully updated. Redirecting to dashboard...
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <Logo className="mx-auto h-12 w-auto" />
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Reset your password</h2>
-          <p className="mt-2 text-sm text-gray-600">Enter your new password below</p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
         </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-center">Reset Your Password</CardTitle>
-            <CardDescription className="text-center">Enter your new password below</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<div>Loading...</div>}>
-              <ResetPasswordForm />
-            </Suspense>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      }
+    >
+      <ResetPasswordContent
+        password={password}
+        confirmPassword={confirmPassword}
+        loading={loading}
+        error={error}
+        success={success}
+        handleSubmit={handleSubmit}
+      />
+    </Suspense>
   )
 }
